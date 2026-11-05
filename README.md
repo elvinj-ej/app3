@@ -37,7 +37,15 @@ exports. The Excel file is parsed in the browser, and the inventory, plan and se
 **Export plan (JSON)** and **Import plan**. Plans are matched on the exact `Application_Primary` text, so loading a newer
 VMInfo export keeps your decisions.
 
-## Run
+## Quick start (one click)
+
+- **Windows:** double-click `start.bat`, or run `start.bat 9000` to use a different port. The default port is 8080.
+- **macOS / Linux:** `./start.sh` or `./start.sh 9000`
+
+The script checks that Node.js is installed, runs `npm install` the first time, builds the app and starts a server on
+`0.0.0.0:<port>`. It then opens your browser (on Windows), and other machines can reach it at `http://<server-name>:<port>`.
+
+## Run manually
 
 ```bash
 npm install
