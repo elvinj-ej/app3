@@ -270,6 +270,7 @@ export default function Planner() {
                         <td style={{ minWidth: 200 }}>
                           <div className="app-name">{a.name}</div>
                           <div className="app-svc">{a.service}{a.owner ? ` · ${a.owner}` : ''}</div>
+                          {a.vms.some((v) => v.origAppKey) && <div className="muted" style={{ fontSize: 11 }} title={[...new Set(a.vms.filter((v) => v.origAppKey).map((v) => v.origAppKey))].join('\n')}>↪ includes {a.vms.filter((v) => v.origAppKey).length} VMs merged by mapping rules</div>}
                         </td>
                         <td>{a.domain}</td>
                         <td className="muted">{a.tier}</td>
@@ -303,7 +304,7 @@ export default function Planner() {
                       {open && subVms.map((v) => (
                         <tr className="sub" key={v.name}>
                           <td /><td />
-                          <td colSpan={2}>{v.name} <span className="muted">· {v.os || 'OS n/a'}</span></td>
+                          <td colSpan={2}>{v.name} <span className="muted">· {v.os || 'OS n/a'}</span>{v.origAppKey && <div className="muted" style={{ fontSize: 11 }}>↪ mapped from “{v.origAppKey}”</div>}</td>
                           <td className="muted">{v.site}</td>
                           <td className="muted" colSpan={1}>{v.poweredOn ? 'On' : 'Off'}</td>
                           <td className="r num">{v.vcpu}</td>
@@ -342,7 +343,7 @@ export default function Planner() {
                   const meta = dispMeta(p.disposition);
                   return (
                     <tr key={v.name + v.vcenter}>
-                      <td>{v.name}{!v.poweredOn && <span className="chip" style={{ marginLeft: 6 }}>Off</span>}</td>
+                      <td>{v.name}{!v.poweredOn && <span className="chip" style={{ marginLeft: 6 }}>Off</span>}{v.origAppKey && <div className="muted" style={{ fontSize: 11 }} title={`VMInfo: ${v.origAppKey}`}>↪ mapped by rule</div>}</td>
                       <td><div className="app-name">{a.name}</div></td>
                       <td>{a.domain}</td>
                       <td className="muted">{a.tier}</td>

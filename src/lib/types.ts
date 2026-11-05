@@ -14,6 +14,8 @@ export interface VM {
   memGB: number;
   storageProvGB: number;
   storageUsedGB: number;
+  /** Set when a mapping rule moved this VM to a different application (the value from the VMInfo file). */
+  origAppKey?: string;
 }
 
 export interface Cluster {
@@ -65,7 +67,7 @@ export interface UploadMeta {
 export interface HistoryEntry {
   id: number;
   appKey: string;
-  action: 'update' | 'bulk' | 'rename' | 'import';
+  action: 'update' | 'bulk' | 'rename' | 'import' | 'rule' | 'delete';
   before: Partial<AppPlan> | null;
   after: Partial<AppPlan> | null;
   changedBy: string;
@@ -135,4 +137,24 @@ export interface AppInfo {
   tier: string;
   domain: string;
   service: string;
+}
+
+/** A correction applied to every VMInfo upload: merge one Application_Primary into another, or move one VM. */
+export interface AppRule {
+  id: number;
+  kind: 'merge' | 'vm';
+  /** merge: source Application_Primary · vm: VM name */
+  source: string;
+  /** Application_Primary the VMs are counted under */
+  target: string;
+  note: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface RuleEffect {
+  vms: number;
+  vcpu: number;
+  /** vm rule: the VMInfo file now gives this VM its own (different) application */
+  conflict?: string;
 }

@@ -65,6 +65,15 @@ Decisions belong to the application, not to a particular upload. They're keyed o
 text, so every new VMInfo upload picks them up automatically. An application counts as off on-prem at the end of its
 target quarter.
 
+### Application mapping rules
+
+On the Inventory Updates page you can correct the VMInfo data without editing the spreadsheet. A **merge** rule counts one
+Application_Primary as another, for example duplicates with a different tier or spelling. An **assign VM** rule moves a
+single VM, for example an untagged one, to an application. Rules apply to every upload, keep the original value (shown in the VM view and
+in the Excel *VMs* and *Mapping rules* sheets), are logged in Activity and can be removed. A rule is flagged *No longer
+needed* once the source disappears from the VMInfo file, for example after the CMDB has been corrected. Merging never deletes a
+decision without asking: a decision on the merged application moves to the target, and if both have one you choose.
+
 ### Collaboration
 
 When someone first opens the app, it asks for their name, which is then recorded against every change and upload.

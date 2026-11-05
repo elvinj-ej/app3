@@ -37,7 +37,7 @@ export function PlanChip({ p }: { p: Partial<AppPlan> | null | undefined }) {
   );
 }
 
-const ACTION_LABEL: Record<HistoryEntry['action'], string> = { update: 'Edited', bulk: 'Bulk edit', rename: 'Re-linked', import: 'Imported' };
+const ACTION_LABEL: Record<HistoryEntry['action'], string> = { update: 'Edited', bulk: 'Bulk edit', rename: 'Re-linked', import: 'Imported', rule: 'Mapping rule', delete: 'Decision removed' };
 
 export function HistoryRow({ h, showApp }: { h: HistoryEntry; showApp?: boolean }) {
   return (
@@ -47,11 +47,15 @@ export function HistoryRow({ h, showApp }: { h: HistoryEntry; showApp?: boolean 
         <span className="muted" title={fmtDateTime(h.changedAt)}>{fmtDateTime(h.changedAt)}</span>
       </div>
       {showApp && <div className="app-name" style={{ marginTop: 2 }}>{h.appKey}</div>}
-      <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
-        {h.action === 'rename' ? <span className="muted">{h.before?.notes}</span> : <PlanChip p={h.before} />}
-        <span className="arrow">→</span>
-        <PlanChip p={h.after} />
-      </div>
+      {h.action === 'rule' ? (
+        <div style={{ marginTop: 4 }} className="muted">{h.after?.notes}</div>
+      ) : (
+        <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
+          {h.action === 'rename' ? <span className="muted">{h.before?.notes}</span> : <PlanChip p={h.before} />}
+          <span className="arrow">→</span>
+          {h.action === 'delete' ? <span className="muted">removed</span> : <PlanChip p={h.after} />}
+        </div>
+      )}
     </div>
   );
 }

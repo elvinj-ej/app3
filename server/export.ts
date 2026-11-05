@@ -6,7 +6,7 @@ import { CONFIDENCE, CONFIDENCE_LABEL, VENDOR_LABEL, deadlineVendor, moveWeight,
 import { addCharts, type ChartDef } from './charts.ts';
 import { APP_NAME } from '../src/lib/brand.ts';
 import { parseApp } from '../src/lib/parse.ts';
-import type { HistoryEntry, Inventory, PlanMap, Settings, UploadMeta } from '../src/lib/types.ts';
+import type { AppRule, HistoryEntry, Inventory, PlanMap, Settings, UploadMeta } from '../src/lib/types.ts';
 
 type Cell = { value?: unknown; type?: unknown; format?: string; fontWeight?: 'bold'; fontSize?: number; backgroundColor?: string; color?: string; wrap?: boolean } | null;
 type Row = Cell[];
@@ -36,6 +36,7 @@ export async function buildTreatmentWorkbook(input: {
   settings: Settings;
   history: HistoryEntry[];
   uploads: UploadMeta[];
+  rules?: AppRule[];
   /** Headline basis for the Executive Summary: risk-adjusted (default) or full plan. */
   basis?: 'risk' | 'plan';
 }): Promise<Buffer> {
@@ -111,7 +112,7 @@ export async function buildTreatmentWorkbook(input: {
   // 4. VMs with their application's treatment
   const vmSheet = sheet(
     'VMs',
-    ['VMName', 'PowerState', 'Application_Primary', 'Domain', 'Tier', 'Environment', 'vCenter', 'VMLocation', 'GuestOS', 'vCPU', 'Memory (GB)', 'Storage (GB)', 'Treatment', 'Target period', 'Off on-prem by'],
+    ['VMName', 'PowerState', 'Application_Primary', 'Original Application_Primary (if remapped)', 'Domain', 'Tier', 'Environment', 'vCenter', 'VMLocation', 'GuestOS', 'vCPU', 'Memory (GB)', 'Storage (GB)', 'Treatment', 'Target period', 'Off on-prem by'],
     [...allVms]
       .sort((x, y) => x.appKey.localeCompare(y.appKey) || x.name.localeCompare(y.name))
       .map((v) => {
@@ -119,12 +120,12 @@ export async function buildTreatmentWorkbook(input: {
         const p = planFor(plans, v.appKey);
         const ex = exitDate(p);
         return [
-          S(v.name), S(v.poweredOn ? 'PoweredOn' : 'PoweredOff'), S(v.appKey), S(a.domain), S(a.tier), S(v.environment), S(v.vcenter),
+          S(v.name), S(v.poweredOn ? 'PoweredOn' : 'PoweredOff'), S(v.appKey), S(v.origAppKey ?? ''), S(a.domain), S(a.tier), S(v.environment), S(v.vcenter),
           S(v.location), S(v.os), N(v.vcpu), N(v.memGB), N(Math.round(v.storageProvGB)), S(dispMeta(p.disposition).label),
           S(ex ? quarterLabel(p.targetFY!, p.targetQ ?? 4) : ''), D(ex),
         ];
       }),
-    [28, 11, 48, 10, 9, 11, 26, 18, 32, 6, 10, 10, 26, 12, 13],
+    [28, 11, 48, 40, 10, 9, 11, 26, 18, 32, 6, 10, 10, 26, 12, 13],
   );
 
   // 5. Decisions that no longer match an application in the latest inventory
@@ -307,6 +308,14 @@ export async function buildTreatmentWorkbook(input: {
   ];
 
   const sheets = [execSheet, treatment, roadmap, byQuarter, vmSheet, changeLog, uploadSheet, chartData];
+  if (input.rules?.length) {
+    sheets.push(sheet('Mapping rules', ['Rule', 'From (VMInfo value)', 'Counted as', 'VMs affected', 'Note', 'Created by', 'Created'],
+      input.rules.map((r) => {
+        const n = allVms.filter((v) => v.origAppKey && (r.kind === 'vm' ? v.name.toLowerCase() === r.source.toLowerCase() : v.origAppKey === r.source)).length;
+        return [S(r.kind === 'merge' ? 'Merge application' : 'Reassign VM'), S(r.source), S(r.target), N(n), S(r.note), S(r.createdBy), DT(r.createdAt)];
+      }),
+      [18, 52, 52, 12, 30, 26, 17]));
+  }
   if (orphans.length) {
     sheets.push(sheet('Unmatched decisions', ['Application_Primary (not in latest inventory)', 'Treatment', 'Target period', 'Notes', 'Last updated by'],
       orphans.map(([k, p]) => [S(k), S(dispMeta(p.disposition).label), S(p.targetFY ? quarterLabel(p.targetFY, p.targetQ ?? 4) : ''), S(p.notes), S(p.updatedBy)]),

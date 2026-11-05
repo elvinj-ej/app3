@@ -11,6 +11,8 @@ import { inventoryFromSheets } from '../src/lib/parse.ts';
 import { defaultSettings } from '../src/lib/defaults.ts';
 import { DISPOSITIONS } from '../src/lib/dispositions.ts';
 import { fyOf } from '../src/lib/fy.ts';
+import { applyRules } from '../src/lib/rules.ts';
+import { NO_APP } from '../src/lib/parse.ts';
 import type { AppPlan, Disposition, Inventory, Settings, UploadDiff } from '../src/lib/types.ts';
 
 // ---------- config ----------
@@ -29,6 +31,25 @@ const DB_PATH = resolve(argVal('db') ?? process.env.DB_PATH ?? join(baseDir, 'da
 const STATIC_DIR = [join(here, 'app'), join(process.cwd(), 'dist'), join(here, '..', 'dist')].find((d) => existsSync(join(d, 'index.html')));
 
 const store = new Store(DB_PATH);
+
+// Application mapping rules agreed with the owner (Nov 2026). Applied once; later edits happen in the app.
+const SEED_BY = 'Setup (agreed mapping, Nov 2026)';
+const SAP = 'SAP (CSV) - Tier1 - SCC (ERP)';
+const seeded = store.seedRules('seed_rules_2026_11', [
+  { kind: 'merge', source: 'SAP (CSV) - Tier1 - SCC (ERP specific to Brisbane)', target: SAP, note: 'Combine SAP applications', createdBy: SEED_BY },
+  { kind: 'vm', source: 'cbo-saptestvm01', target: SAP, note: 'Untagged SAP test VM', createdBy: SEED_BY },
+  { kind: 'merge', source: 'Ysoft - Tier3 - ISD (Print Services)', target: 'Ysoft - Tier0 - ISD (Print Services)', note: 'Combine Ysoft applications', createdBy: SEED_BY },
+  { kind: 'merge', source: 'JAMA (CSV) - Tier3 - R&D (Requirement mgmt.)', target: 'JAMA (CSV) - Tier3 - R&D (Requirement Management)', note: 'Combine JAMA applications', createdBy: SEED_BY },
+  { kind: 'merge', source: 'AuditBase - TierX - SCC (For EUC team)', target: 'AuditBase - TierX - ISD (Auditabase tool)', note: 'Combine AuditBase applications', createdBy: SEED_BY },
+  { kind: 'merge', source: 'VIVA - TierX - SCC (Reimbursement Application Services)', target: 'VIVA (reinburcement Germany) - TierX - SCC (Viva application)', note: 'Combine VIVA applications', createdBy: SEED_BY },
+]);
+if (seeded) console.log(`  Added ${seeded} application mapping rules`);
+
+/** Inventory as the app sees it: the uploaded file with mapping rules applied. */
+function mappedInventory(id: number): Inventory | null {
+  const inv = store.getInventory(id);
+  return inv ? applyRules(inv, store.listRules()).inventory : null;
+}
 const VALID_DISP = new Set<Disposition>(DISPOSITIONS.map((d) => d.id));
 
 function sharedDefaults(): SharedSettings {
@@ -141,16 +162,16 @@ api.get('/rev', (_req, res) => res.json({ rev: store.rev() }));
 
 api.get('/state', (_req, res) => {
   const uploads = store.listUploads();
-  res.json({ rev: store.rev(), settings: fullSettings(), plans: store.getPlans(), latestUpload: uploads[0] ?? null, uploadCount: uploads.length });
+  res.json({ rev: store.rev(), settings: fullSettings(), plans: store.getPlans(), latestUpload: uploads[0] ?? null, uploadCount: uploads.length, rulesRev: store.rulesRev() });
 });
 
 api.get('/inventory/latest', (_req, res) => {
   const id = store.latestUploadId();
   if (!id) return res.status(204).end();
-  res.json(store.getInventory(id));
+  res.json(mappedInventory(id));
 });
 api.get('/inventory/:id', (req, res) => {
-  const inv = store.getInventory(Number(req.params.id));
+  const inv = mappedInventory(Number(req.params.id));
   if (!inv) return res.status(404).json({ error: 'Not found' });
   res.json(inv);
 });
@@ -205,6 +226,56 @@ api.post('/plans/rename', wrap((req, res) => {
   } catch (e) {
     throw new HttpError(400, e instanceof Error ? e.message : String(e));
   }
+  res.json({ ok: true, rev: store.rev() });
+}));
+
+// ---------- application mapping rules ----------
+api.get('/rules', (_req, res) => {
+  const rules = store.listRules();
+  const id = store.latestUploadId();
+  const inv = id ? store.getInventory(id) : null;
+  const effects = inv ? applyRules(inv, rules).effects : {};
+  const keys = new Set((inv?.vms ?? []).map((v) => v.appKey));
+  const names = new Set((inv?.vms ?? []).map((v) => v.name.toLowerCase()));
+  res.json(rules.map((r) => ({
+    ...r,
+    effect: effects[r.id] ?? { vms: 0, vcpu: 0 },
+    sourceFound: r.kind === 'merge' ? keys.has(r.source) : names.has(r.source.toLowerCase()),
+  })));
+});
+
+api.post('/rules', wrap((req, res) => {
+  const { kind, source, target, note, keep } = req.body ?? {};
+  if (kind !== 'merge' && kind !== 'vm') throw new HttpError(400, 'kind must be merge or vm');
+  const src = String(source ?? '').trim();
+  const tgt = String(target ?? '').trim();
+  if (!src || !tgt) throw new HttpError(400, 'source and target are required');
+  if (kind === 'merge' && src === tgt) throw new HttpError(400, 'An application cannot be merged into itself');
+  if (tgt === NO_APP) throw new HttpError(400, 'Choose a real application as the target');
+  const rules = store.listRules();
+  if (rules.some((r) => r.kind === kind && r.source.toLowerCase() === src.toLowerCase())) throw new HttpError(409, 'A rule for this already exists – remove it first');
+  if (kind === 'merge' && rules.some((r) => r.kind === 'merge' && r.source === tgt)) throw new HttpError(400, `“${tgt}” is itself merged into another application – pick that one as the target`);
+  if (kind === 'merge') {
+    const sp = store.getPlan(src);
+    const tp = store.getPlan(tgt);
+    const differs = sp && tp && (sp.disposition !== tp.disposition || sp.targetFY !== tp.targetFY || sp.targetQ !== tp.targetQ || sp.confidence !== tp.confidence);
+    if (differs && keep !== 'target' && keep !== 'source' && keep !== 'both') {
+      throw new HttpError(409, 'Both applications have a decision – choose which one to keep', { needsChoice: true, source: sp, target: tp });
+    }
+  }
+  const rule = store.tx(() => store.addRule({ kind, source: src, target: tgt, note: String(note ?? '').slice(0, 500), createdBy: userOf(req) }, { keep: keep === 'source' ? 'source' : 'target', discardSource: keep === 'target' }));
+  res.json({ rule, rev: store.rev() });
+}));
+
+api.delete('/rules/:id', wrap((req, res) => {
+  store.tx(() => store.deleteRule(Number(req.params.id), userOf(req)));
+  res.json({ ok: true, rev: store.rev() });
+}));
+
+api.delete('/plans', wrap((req, res) => {
+  const key = String(req.query.key ?? '');
+  if (!key) throw new HttpError(400, 'key is required');
+  store.tx(() => store.deletePlan(key, userOf(req)));
   res.json({ ok: true, rev: store.rev() });
 }));
 
@@ -278,8 +349,8 @@ api.get('/uploads/:id/file', (req, res) => {
 
 api.get('/export/treatment-plan.xlsx', wrap(async (req, res) => {
   const id = store.latestUploadId();
-  const inv = id ? store.getInventory(id) : null;
-  const buf = await buildTreatmentWorkbook({ inventory: inv, plans: store.getPlans(), settings: fullSettings(), history: store.history({ limit: 5000 }), uploads: store.listUploads(), basis: req.query.basis === 'plan' ? 'plan' : 'risk' });
+  const inv = id ? mappedInventory(id) : null;
+  const buf = await buildTreatmentWorkbook({ rules: store.listRules(), inventory: inv, plans: store.getPlans(), settings: fullSettings(), history: store.history({ limit: 5000 }), uploads: store.listUploads(), basis: req.query.basis === 'plan' ? 'plan' : 'risk' });
   const name = `Treatment-Plan-${new Date().toISOString().slice(0, 10)}.xlsx`;
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="${name}"`);

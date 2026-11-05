@@ -14,6 +14,7 @@ interface StateResponse {
   plans: PlanMap;
   latestUpload: UploadMeta | null;
   uploadCount: number;
+  rulesRev?: string;
 }
 
 interface Toast {
@@ -68,7 +69,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<Settings>(defaultSettings());
   const [rev, setRev] = useState(-1);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const invIdRef = useRef<number | null>(null);
+  const invIdRef = useRef<string | null>(null);
   const revRef = useRef(-1);
 
   const toast = useCallback((text: string, kind: Toast['kind'] = 'info') => {
@@ -85,9 +86,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     revRef.current = s.rev;
     setRev(s.rev);
     const latestId = s.latestUpload?.id ?? null;
-    if (latestId !== invIdRef.current) {
+    const tag = latestId ? `${latestId}|${s.rulesRev ?? ''}` : null;
+    if (tag !== invIdRef.current) {
       const inv = latestId ? await api<Inventory>('/inventory/latest') : null;
-      invIdRef.current = latestId;
+      invIdRef.current = tag;
       setInventory(inv);
     }
     setConnError(null);

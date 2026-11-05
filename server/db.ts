@@ -1,11 +1,11 @@
 import { DatabaseSync } from 'node:sqlite';
 import { copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { AppPlan, HistoryEntry, Inventory, PlanMap, Settings, UploadDiff, UploadMeta } from '../src/lib/types.ts';
+import type { AppPlan, AppRule, HistoryEntry, Inventory, PlanMap, Settings, UploadDiff, UploadMeta } from '../src/lib/types.ts';
 
 export type SharedSettings = Omit<Settings, 'currentFY'>;
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export class Store {
   db: DatabaseSync;
@@ -71,7 +71,8 @@ export class Store {
     const cols = (this.db.prepare(`PRAGMA table_info(plans)`).all() as { name: string }[]).map((c) => c.name);
     // Additive columns only – existing rows keep every value.
     const add: [string, string][] = ([['confidence', 'TEXT'], ['review_fy', 'INTEGER'], ['review_q', 'INTEGER']] as [string, string][]).filter(([c]) => !cols.includes(c));
-    if (add.length && this.existed) {
+    const hasRules = !!this.db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'app_rules'`).get();
+    if ((add.length || !hasRules) && this.existed) {
       const dir = join(dirname(this.path), 'backups');
       mkdirSync(dir, { recursive: true });
       const dest = join(dir, `footprint-before-schema${SCHEMA_VERSION}-${new Date().toISOString().replace(/[:.]/g, '-')}.db`);
@@ -81,6 +82,16 @@ export class Store {
     }
     this.tx(() => {
       for (const [c, t] of add) this.db.exec(`ALTER TABLE plans ADD COLUMN ${c} ${t}`);
+      this.db.exec(`CREATE TABLE IF NOT EXISTS app_rules (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL,
+        source TEXT NOT NULL,
+        target TEXT NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(kind, source)
+      )`);
       this.db.prepare(`INSERT INTO kv(key, value) VALUES('schema', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(String(SCHEMA_VERSION));
     });
   }
@@ -222,6 +233,82 @@ export class Store {
       changedBy: String(r.changed_by),
       changedAt: String(r.changed_at),
     }));
+  }
+
+  /** Remove a decision (kept in the change history). */
+  deletePlan(key: string, user: string) {
+    const before = this.getPlan(key);
+    if (!before) return;
+    this.db.prepare(`DELETE FROM plans WHERE app_key = ?`).run(key);
+    this.addHistory(key, 'delete', strip(before), null, user, new Date().toISOString());
+    this.bump();
+  }
+
+  // ---------- application mapping rules ----------
+  listRules(): AppRule[] {
+    const rows = this.db.prepare(`SELECT * FROM app_rules ORDER BY id`).all() as Record<string, unknown>[];
+    return rows.map((r) => ({
+      id: Number(r.id), kind: r.kind as AppRule['kind'], source: String(r.source), target: String(r.target),
+      note: String(r.note ?? ''), createdBy: String(r.created_by), createdAt: String(r.created_at),
+    }));
+  }
+
+  rulesRev(): string {
+    const r = this.db.prepare(`SELECT COUNT(*) AS n, COALESCE(MAX(id), 0) AS m FROM app_rules`).get() as { n: number; m: number };
+    return `${r.n}.${r.m}`;
+  }
+
+  /**
+   * Add a rule. For merges, decisions are never lost: a decision that only exists on the source moves to the target;
+   * when both exist, `keep` picks which one the target ends up with ('target' leaves the source's decision in place
+   * as an unmatched decision unless discardSource is set).
+   */
+  addRule(rule: Omit<AppRule, 'id' | 'createdAt'>, opts: { keep?: 'target' | 'source'; discardSource?: boolean } = {}): AppRule {
+    const now = new Date().toISOString();
+    const res = this.db
+      .prepare(`INSERT INTO app_rules(kind, source, target, note, created_by, created_at) VALUES(?, ?, ?, ?, ?, ?)`)
+      .run(rule.kind, rule.source, rule.target, rule.note, rule.createdBy, now);
+    const label = rule.kind === 'merge' ? `Merged “${rule.source}” into this application` : `VM ${rule.source} assigned to this application`;
+    this.addHistory(rule.target, 'rule', null, { notes: `${label}${rule.note ? ` – ${rule.note}` : ''}` }, rule.createdBy, now);
+    if (rule.kind === 'merge') {
+      const src = this.getPlan(rule.source);
+      const tgt = this.getPlan(rule.target);
+      if (src && !tgt) this.renamePlan(rule.source, rule.target, rule.createdBy);
+      else if (src && tgt) {
+        if (opts.keep === 'source') {
+          this.writePlan(rule.target, { disposition: src.disposition, targetFY: src.targetFY, targetQ: src.targetQ, notes: src.notes, confidence: src.confidence, reviewFY: src.reviewFY, reviewQ: src.reviewQ }, rule.createdBy, 'rule');
+          this.deletePlan(rule.source, rule.createdBy);
+        } else if (opts.discardSource) this.deletePlan(rule.source, rule.createdBy);
+      }
+    }
+    this.bump();
+    return this.listRules().find((r) => r.id === Number(res.lastInsertRowid))!;
+  }
+
+  deleteRule(id: number, user: string) {
+    const r = this.listRules().find((x) => x.id === id);
+    if (!r) return;
+    this.db.prepare(`DELETE FROM app_rules WHERE id = ?`).run(id);
+    const label = r.kind === 'merge' ? `Removed merge of “${r.source}” into this application` : `Removed assignment of VM ${r.source} to this application`;
+    this.addHistory(r.target, 'rule', null, { notes: label }, user, new Date().toISOString());
+    this.bump();
+  }
+
+  /** One-time setup of rules agreed with the owner; skipped if already applied once (even if later removed). */
+  seedRules(key: string, rules: Omit<AppRule, 'id' | 'createdAt'>[]) {
+    if (this.db.prepare(`SELECT value FROM kv WHERE key = ?`).get(key)) return 0;
+    let n = 0;
+    this.tx(() => {
+      for (const r of rules) {
+        const exists = this.db.prepare(`SELECT id FROM app_rules WHERE kind = ? AND source = ?`).get(r.kind, r.source);
+        if (!exists) {
+          this.addRule(r);
+          n++;
+        }
+      }
+      this.db.prepare(`INSERT INTO kv(key, value) VALUES(?, ?)`).run(key, new Date().toISOString());
+    });
+    return n;
   }
 
   // ---------- uploads ----------
