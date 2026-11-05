@@ -1,0 +1,9 @@
+node_modules
+dist
+*.local
+.DS_Store
+# Never commit inventory exports - this repo is public
+*.xlsx
+*.xls
+*.csv
+plan*.json
