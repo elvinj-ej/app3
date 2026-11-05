@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# On-Prem Footprint - run from a source checkout. Usage: ./start.sh [port]
+# OnPrem Transformation Planner - run from a source checkout. Usage: ./start.sh [port]
 set -e
 cd "$(dirname "$0")"
 PORT="${1:-8080}"

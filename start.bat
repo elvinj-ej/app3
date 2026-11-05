@@ -1,9 +1,9 @@
 @echo off
 setlocal
 REM ------------------------------------------------------------------
-REM  On-Prem Footprint - run from a source checkout (needs internet once
+REM  OnPrem Transformation Planner - run from a source checkout (needs internet once
 REM  for npm install). For servers without internet, use the release
-REM  package instead: "npm run package" -> release\OnPremFootprint-x.y.z.zip
+REM  package instead: "npm run package" -> release\OnPremTransformationPlanner-x.y.z.zip
 REM  Usage:  start.bat [port]      (default 8080)
 REM ------------------------------------------------------------------
 cd /d "%~dp0"

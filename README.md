@@ -1,4 +1,4 @@
-# On-Prem Footprint
+# OnPrem Transformation Planner
 
 A web app where a team plans the on-prem virtualisation exit together. Each application (`Application_Primary`) gets
 a **treatment** and a **target FY quarter**. The app projects how VMs and vCPU decline quarter by quarter against the
@@ -9,7 +9,7 @@ FY runs **1 July – 30 June** (FY27 = Jul 2026 – Jun 2027). Q1 = Jul–Sep, Q
 ## Deploy on a server (no GitHub, no internet)
 
 1. Install **Node.js 22.13+ or 24 LTS** on the server. This is the only prerequisite.
-2. Copy `OnPremFootprint-<version>.zip` to the server and unzip it. Build the zip with `npm run package`, or take it
+2. Copy `OnPremTransformationPlanner-<version>.zip` to the server and unzip it. Build the zip with `npm run package`, or take it
    from a release.
 3. Run `start.bat` for port 8080, or `start.bat 9000` for another port. On Linux, run `./start.sh 9000`.
 4. Everyone opens `http://<server>:<port>`.
@@ -69,7 +69,7 @@ build output. Inventory and decisions exist only in the server's `data/footprint
 npm install
 npm run dev:server   # API on :8090 (auto-restarts on change)
 npm run dev          # web app on :5173, with /api proxied to :8090
-npm run package      # builds release/OnPremFootprint-<version>.zip
+npm run package      # builds release/OnPremTransformationPlanner-<version>.zip
 ```
 
 `start.bat` and `start.sh` in the repo root build from source and run, which needs internet once for `npm install`.

@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableDelayedExpansion
 REM ------------------------------------------------------------------
-REM  On-Prem Footprint - start the server (release package)
+REM  OnPrem Transformation Planner - start the server (release package)
 REM  Usage:  start.bat            (port 8080)
 REM          start.bat 9000       (port 9000)
 REM  Data is stored in the "data" folder next to this file.

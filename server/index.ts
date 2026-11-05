@@ -289,7 +289,7 @@ if (STATIC_DIR) {
 
 app.listen(PORT, HOST, () => {
   console.log('');
-  console.log(`  On-Prem Footprint is running`);
+  console.log(`  OnPrem Transformation Planner is running`);
   console.log(`    Local:    http://localhost:${PORT}`);
   console.log(`    Network:  http://${hostname()}:${PORT}`);
   console.log(`    Database: ${DB_PATH}`);

@@ -1,5 +1,5 @@
-On-Prem Footprint  v{{VERSION}}
-===============================
+OnPrem Transformation Planner  v{{VERSION}}
+=========================================
 
 Self-contained package. Needs only Node.js (22.13+ or 24 LTS) on the server:
 no internet access, no "npm install", no GitHub.

@@ -1,5 +1,5 @@
 // Assembles a self-contained release folder + zip:
-//   release/OnPremFootprint-<version>/{server.mjs, app/, start.bat, start.sh, README.txt}
+//   release/OnPremTransformationPlanner-<version>/{server.mjs, app/, start.bat, start.sh, README.txt}
 // Requires `vite build` and `vite build -c vite.server.config.ts` to have run (see "npm run package").
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, copyFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
@@ -7,7 +7,7 @@ import { crc32, deflateRawSync } from 'node:zlib';
 
 const root = process.cwd();
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-const name = `OnPremFootprint-${pkg.version}`;
+const name = `OnPremTransformationPlanner-${pkg.version}`;
 const out = join(root, 'release', name);
 
 for (const f of ['dist/index.html', 'build/server/server.mjs']) {
