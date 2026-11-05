@@ -117,7 +117,7 @@ export interface Deadline {
   id: string;
   label: string;
   date: string; // yyyy-mm-dd
-  kind: 'VMware' | 'Cisco' | 'FlashStack' | 'Lenovo' | 'Other';
+  kind: 'VMware' | 'Cisco' | 'FlashStack' | 'Lenovo' | 'GoLive' | 'DressRehearsal' | 'Other';
   confirmed: boolean;
   note?: string;
 }

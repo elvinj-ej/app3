@@ -17,6 +17,20 @@ export function defaultVendor(clusterName: string): HwVendor {
 
 export const VENDOR_LABEL: Record<HwVendor, string> = { Cisco: 'Cisco HyperFlex', FlashStack: 'Cisco FlashStack', Lenovo: 'Lenovo', Other: 'Other' };
 
+/** Deadline types: option text in Settings, short label on the timeline chart. */
+export const DEADLINE_KINDS: { id: Deadline['kind']; label: string; short: string }[] = [
+  { id: 'VMware', label: 'VMware licence', short: 'VMware' },
+  { id: 'Cisco', label: 'Cisco HyperFlex HW', short: 'HyperFlex' },
+  { id: 'FlashStack', label: 'Cisco FlashStack HW', short: 'FlashStack' },
+  { id: 'Lenovo', label: 'Lenovo HW', short: 'Lenovo' },
+  { id: 'GoLive', label: 'Go-Live', short: 'Go-Live' },
+  { id: 'DressRehearsal', label: 'Dress Rehearsal', short: 'Dress rehearsal' },
+  { id: 'Other', label: 'Other', short: 'Other' },
+];
+export function deadlineShort(kind: Deadline['kind']): string {
+  return DEADLINE_KINDS.find((k) => k.id === kind)?.short ?? String(kind);
+}
+
 /** Deadline kinds that relate to a hardware vendor's clusters. */
 export function deadlineVendor(kind: Deadline['kind']): HwVendor | null {
   return kind === 'Cisco' || kind === 'FlashStack' || kind === 'Lenovo' ? kind : null;

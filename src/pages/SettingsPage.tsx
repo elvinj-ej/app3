@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { defaultVendor, useStore, vendorOf } from '../lib/store';
 import { fyLabel } from '../lib/fy';
 import type { ConfidenceWeights, Deadline, HwVendor, PlanMap } from '../lib/types';
-import { DEFAULT_WEIGHTS } from '../lib/defaults';
+import { DEADLINE_KINDS, DEFAULT_WEIGHTS } from '../lib/defaults';
 import { newId } from '../lib/api';
 
 export default function SettingsPage() {
@@ -108,12 +108,8 @@ export default function SettingsPage() {
                   <td><input className="input select-sm" style={{ width: '100%', minWidth: 200 }} value={d.label} onChange={(e) => editDl(d.id, { label: e.target.value })} /></td>
                   <td><input className="input select-sm" type="date" value={d.date} onChange={(e) => e.target.value && editDl(d.id, { date: e.target.value })} /></td>
                   <td>
-                    <select className="select select-sm" value={d.kind} onChange={(e) => editDl(d.id, { kind: e.target.value as Deadline['kind'] })}>
-                      <option value="VMware">VMware licence</option>
-                      <option value="Cisco">Cisco HyperFlex HW</option>
-                      <option value="FlashStack">Cisco FlashStack HW</option>
-                      <option value="Lenovo">Lenovo HW</option>
-                      <option value="Other">Other</option>
+                    <select className="select select-sm" value={d.kind} onChange={(e) => editDl(d.id, { kind: e.target.value as Deadline['kind'] })} aria-label="Deadline type">
+                      {DEADLINE_KINDS.map((k) => <option key={k.id} value={k.id}>{k.label}</option>)}
                     </select>
                   </td>
                   <td><input type="checkbox" checked={d.confirmed} onChange={(e) => editDl(d.id, { confirmed: e.target.checked })} aria-label="Confirmed" /></td>

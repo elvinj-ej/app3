@@ -6,7 +6,7 @@ import { useStore, vendorOf } from '../lib/store';
 import { DISP, DISPOSITIONS, dispMeta } from '../lib/dispositions';
 import { daysUntil, fmtDate, fyEnd, fyLabel, fyOf, fyQuarterOf, humanCountdown, parseISODate, quarterLabel, quarterRange } from '../lib/fy';
 import { byDisposition, exitDate, exitsBy, footprintScenarios, groupApps, planFor, scopeVMs, totals, trend, whatStays, type Granularity, type Scenarios, type TrendPoint } from '../lib/projection';
-import { CONFIDENCE, VENDOR_LABEL, deadlineVendor } from '../lib/defaults';
+import { CONFIDENCE, VENDOR_LABEL, deadlineShort, deadlineVendor } from '../lib/defaults';
 import { parseApp } from '../lib/parse';
 import { fmt, useColors } from '../lib/useColors';
 import type { Deadline } from '../lib/types';
@@ -85,7 +85,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
         x={fy}
         stroke={color('--text-3')}
         strokeDasharray="4 4"
-        label={showLabel ? { value: ds.map((d) => d.kind).join(' · '), position: 'top', fill, fontSize: 11, offset: 8 } : undefined}
+        label={showLabel ? { value: [...new Set(ds.map((d) => deadlineShort(d.kind)))].join(' · '), position: 'top', fill, fontSize: 11, offset: 8 } : undefined}
       />
     ));
 
