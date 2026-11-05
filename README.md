@@ -53,7 +53,13 @@ Excel export follows it. The absolute charts shade the range from committed to f
 ### Treatments
 
 Retire · Move to SaaS · Modernise → AWS · Modernise → Azure · Lift & Shift → AWS · Stay On-Prem (Data Sovereignty) ·
-Stay On-Prem (Latency) · Not yet decided.
+Stay On-Prem (Latency) · Stay On-Prem (Maintain: no migration planned, not sovereignty- or latency-bound) · Not yet decided.
+
+The three Stay On-Prem treatments can carry an optional **Review by** quarter, which marks when the decision should be
+re-assessed. It does not change the forecast. The Executive Summary's **What stays on-prem** card, also in the Excel export,
+breaks the remaining end-of-horizon footprint down into Sovereignty, Latency, Maintain, Undecided, moves that have no
+target or fall after the horizon, and (in risk-adjusted view) the confidence shortfall on scheduled moves.
+If the app reads a treatment it doesn't recognise, for example one written by a newer version, it shows that application as Undecided instead of failing.
 
 Decisions belong to the application, not to a particular upload. They're keyed on the exact `Application_Primary`
 text, so every new VMInfo upload picks them up automatically. An application counts as off on-prem at the end of its

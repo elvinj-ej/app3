@@ -1,4 +1,4 @@
-import { DISP } from '../lib/dispositions';
+import { dispMeta } from '../lib/dispositions';
 import { quarterLabel, quarterRange } from '../lib/fy';
 import type { AppPlan, HistoryEntry } from '../lib/types';
 import { CONFIDENCE } from '../lib/defaults';
@@ -25,11 +25,12 @@ export function targetText(p: Partial<AppPlan> | null | undefined): string {
 
 export function PlanChip({ p }: { p: Partial<AppPlan> | null | undefined }) {
   if (!p) return <span className="muted">—</span>;
-  const m = p.disposition ? DISP[p.disposition] : null;
+  const m = p.disposition ? dispMeta(p.disposition) : null;
   return (
     <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
       {m && <span className="chip"><i className="dot" style={{ background: m.color }} />{m.short}</span>}
       {p.targetFY ? <span className="chip">{quarterLabel(p.targetFY, p.targetQ ?? 4)}</span> : null}
+      {p.reviewFY ? <span className="chip">Review {quarterLabel(p.reviewFY, p.reviewQ ?? 4)}</span> : null}
       {p.confidence ? <span className="chip"><i className="dot" style={{ background: CONFIDENCE.find((c) => c.id === p.confidence)?.color }} />{CONFIDENCE.find((c) => c.id === p.confidence)?.label} confidence</span> : null}
       {p.notes ? <span className="muted" style={{ fontSize: 12 }}>“{p.notes}”</span> : null}
     </span>

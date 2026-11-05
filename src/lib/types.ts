@@ -80,7 +80,8 @@ export type Disposition =
   | 'modernize_azure'
   | 'rehost_aws'
   | 'retain_sovereignty'
-  | 'retain_latency';
+  | 'retain_latency'
+  | 'retain_maintain';
 
 export type Quarter = 1 | 2 | 3 | 4;
 
@@ -96,6 +97,9 @@ export interface AppPlan {
   targetQ?: Quarter; // quarter of the FY in which it leaves on-prem (default Q4)
   notes?: string;
   confidence?: Confidence;
+  /** Optional re-assessment quarter for applications that stay on-prem. */
+  reviewFY?: number;
+  reviewQ?: Quarter;
   // server-maintained
   version?: number;
   updatedBy?: string;

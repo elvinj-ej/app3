@@ -5,7 +5,7 @@ import type { AppPlan, HistoryEntry, Inventory, PlanMap, Settings, UploadDiff, U
 
 export type SharedSettings = Omit<Settings, 'currentFY'>;
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export class Store {
   db: DatabaseSync;
@@ -69,8 +69,9 @@ export class Store {
     const cur = Number((this.db.prepare(`SELECT value FROM kv WHERE key = 'schema'`).get() as { value: string } | undefined)?.value ?? 1);
     if (cur >= SCHEMA_VERSION) return;
     const cols = (this.db.prepare(`PRAGMA table_info(plans)`).all() as { name: string }[]).map((c) => c.name);
-    const needsChange = !cols.includes('confidence');
-    if (needsChange && this.existed) {
+    // Additive columns only – existing rows keep every value.
+    const add: [string, string][] = ([['confidence', 'TEXT'], ['review_fy', 'INTEGER'], ['review_q', 'INTEGER']] as [string, string][]).filter(([c]) => !cols.includes(c));
+    if (add.length && this.existed) {
       const dir = join(dirname(this.path), 'backups');
       mkdirSync(dir, { recursive: true });
       const dest = join(dir, `footprint-before-schema${SCHEMA_VERSION}-${new Date().toISOString().replace(/[:.]/g, '-')}.db`);
@@ -79,7 +80,7 @@ export class Store {
       console.log(`  Database upgraded – previous version backed up to ${dest}`);
     }
     this.tx(() => {
-      if (needsChange) this.db.exec(`ALTER TABLE plans ADD COLUMN confidence TEXT`);
+      for (const [c, t] of add) this.db.exec(`ALTER TABLE plans ADD COLUMN ${c} ${t}`);
       this.db.prepare(`INSERT INTO kv(key, value) VALUES('schema', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(String(SCHEMA_VERSION));
     });
   }
@@ -135,6 +136,8 @@ export class Store {
     if (r.target_q != null) p.targetQ = Number(r.target_q) as AppPlan['targetQ'];
     if (r.notes) p.notes = String(r.notes);
     if (r.confidence) p.confidence = String(r.confidence) as AppPlan['confidence'];
+    if (r.review_fy != null) p.reviewFY = Number(r.review_fy);
+    if (r.review_q != null) p.reviewQ = Number(r.review_q) as AppPlan['reviewQ'];
     return p;
   }
 
@@ -149,7 +152,7 @@ export class Store {
   }
 
   /** Upsert one plan and record history. Returns the stored plan. */
-  writePlan(key: string, next: Pick<AppPlan, 'disposition' | 'targetFY' | 'targetQ' | 'notes' | 'confidence'>, user: string, action: HistoryEntry['action']): AppPlan {
+  writePlan(key: string, next: Pick<AppPlan, 'disposition' | 'targetFY' | 'targetQ' | 'notes' | 'confidence' | 'reviewFY' | 'reviewQ'>, user: string, action: HistoryEntry['action']): AppPlan {
     const before = this.getPlan(key);
     const now = new Date().toISOString();
     const clean = {
@@ -158,6 +161,8 @@ export class Store {
       targetQ: next.targetFY ? (next.targetQ ?? 4) : null,
       notes: next.notes ?? '',
       confidence: next.confidence ?? null,
+      reviewFY: next.reviewFY ?? null,
+      reviewQ: next.reviewFY ? (next.reviewQ ?? 4) : null,
     };
     const same =
       before &&
@@ -165,17 +170,19 @@ export class Store {
       (before.targetFY ?? null) === clean.targetFY &&
       (before.targetQ ?? null) === clean.targetQ &&
       (before.notes ?? '') === clean.notes &&
-      (before.confidence ?? null) === clean.confidence;
+      (before.confidence ?? null) === clean.confidence &&
+      (before.reviewFY ?? null) === clean.reviewFY &&
+      (before.reviewQ ?? null) === clean.reviewQ;
     if (same) return before;
     this.db
       .prepare(
-        `INSERT INTO plans(app_key, disposition, target_fy, target_q, notes, confidence, version, updated_by, updated_at)
-         VALUES(?, ?, ?, ?, ?, ?, 1, ?, ?)
+        `INSERT INTO plans(app_key, disposition, target_fy, target_q, notes, confidence, review_fy, review_q, version, updated_by, updated_at)
+         VALUES(?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
          ON CONFLICT(app_key) DO UPDATE SET disposition = excluded.disposition, target_fy = excluded.target_fy,
-           target_q = excluded.target_q, notes = excluded.notes, confidence = excluded.confidence, version = plans.version + 1,
+           target_q = excluded.target_q, notes = excluded.notes, confidence = excluded.confidence, review_fy = excluded.review_fy, review_q = excluded.review_q, version = plans.version + 1,
            updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
       )
-      .run(key, clean.disposition, clean.targetFY, clean.targetQ, clean.notes, clean.confidence, user, now);
+      .run(key, clean.disposition, clean.targetFY, clean.targetQ, clean.notes, clean.confidence, clean.reviewFY, clean.reviewQ, user, now);
     const after = this.getPlan(key)!;
     this.addHistory(key, action, before && strip(before), strip(after), user, now);
     this.bump();
@@ -278,6 +285,6 @@ export class Store {
 }
 
 function strip(p: AppPlan): Partial<AppPlan> {
-  const { disposition, targetFY, targetQ, notes, confidence } = p;
-  return { disposition, targetFY, targetQ, notes, confidence };
+  const { disposition, targetFY, targetQ, notes, confidence, reviewFY, reviewQ } = p;
+  return { disposition, targetFY, targetQ, notes, confidence, reviewFY, reviewQ };
 }

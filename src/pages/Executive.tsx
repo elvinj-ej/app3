@@ -3,9 +3,9 @@ import {
   Area, Bar, BarChart, CartesianGrid, ComposedChart, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import { useStore, vendorOf } from '../lib/store';
-import { DISP, DISPOSITIONS } from '../lib/dispositions';
+import { DISP, DISPOSITIONS, dispMeta } from '../lib/dispositions';
 import { daysUntil, fmtDate, fyEnd, fyLabel, fyOf, fyQuarterOf, humanCountdown, parseISODate, quarterLabel, quarterRange } from '../lib/fy';
-import { byDisposition, exitDate, exitsBy, footprintScenarios, groupApps, planFor, scopeVMs, totals, trend, type Granularity, type Scenarios, type TrendPoint } from '../lib/projection';
+import { byDisposition, exitDate, exitsBy, footprintScenarios, groupApps, planFor, scopeVMs, totals, trend, whatStays, type Granularity, type Scenarios, type TrendPoint } from '../lib/projection';
 import { CONFIDENCE, VENDOR_LABEL, deadlineVendor } from '../lib/defaults';
 import { parseApp } from '../lib/parse';
 import { fmt, useColors } from '../lib/useColors';
@@ -395,6 +395,8 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
         </div>
       </div>
 
+      <WhatStaysCard basis={basis} />
+
       <UpcomingMoves />
 
       <div className="grid g-2">
@@ -558,7 +560,7 @@ function UpcomingMoves() {
   const rows = useMemo(() => {
     return groupApps(vms)
       .map((a) => ({ a, p: planFor(plans, a.key) }))
-      .filter(({ p }) => DISP[p.disposition].leavesOnPrem && p.targetFY)
+      .filter(({ p }) => dispMeta(p.disposition).leavesOnPrem && p.targetFY)
       .sort((x, y) => x.p.targetFY! * 10 + (x.p.targetQ ?? 4) - (y.p.targetFY! * 10 + (y.p.targetQ ?? 4)) || y.a.vcpu - x.a.vcpu);
   }, [vms, plans]);
   const [all, setAll] = useState(false);
@@ -579,7 +581,7 @@ function UpcomingMoves() {
                   <td style={{ whiteSpace: 'nowrap' }}><b>{quarterLabel(p.targetFY!, p.targetQ ?? 4)}</b> <span className="muted">· {quarterRange(p.targetFY!, p.targetQ ?? 4)}</span></td>
                   <td><span className="app-name">{a.name}</span></td>
                   <td>{a.domain}</td>
-                  <td><span className="chip"><i className="dot" style={{ background: DISP[p.disposition].color }} />{DISP[p.disposition].short}</span></td>
+                  <td><span className="chip"><i className="dot" style={{ background: dispMeta(p.disposition).color }} />{dispMeta(p.disposition).short}</span></td>
                   <td><ConfChip c={p.confidence} /></td>
                   <td className="r num">{a.vmCount}</td>
                   <td className="r num">{fmt(a.vcpu)}</td>
@@ -637,4 +639,35 @@ function toView(p: TrendPoint, basis: Basis): ViewPoint {
   const risk = { vms: p.vms, vcpu: p.vcpu, vmsPct: p.vmsPct, vcpuPct: p.vcpuPct };
   if (basis === 'risk') return { ...p, basis, vmsRisk: p.vms, vcpuRisk: p.vcpu, altVms: p.vmsPlan, altVcpu: p.vcpuPlan };
   return { ...p, basis, vms: p.vmsPlan, vcpu: p.vcpuPlan, vmsPct: p.vmsPlanPct, vcpuPct: p.vcpuPlanPct, vmsRisk: risk.vms, vcpuRisk: risk.vcpu, altVms: risk.vms, altVcpu: risk.vcpu };
+}
+
+function WhatStaysCard({ basis }: { basis: Basis }) {
+  const { inventory, plans, settings } = useStore();
+  const vms = scopeVMs(inventory.vms, settings);
+  const rows = useMemo(() => whatStays(vms, plans, settings, basis).filter((r) => basis === 'risk' || r.id !== 'risk'), [vms, plans, settings, basis]);
+  const total = rows.reduce((a, r) => a + r.vcpu, 0);
+  const totalVms = rows.reduce((a, r) => a + r.vms, 0);
+  const max = Math.max(...rows.map((r) => r.vcpu), 1);
+  return (
+    <div className="card card-pad" style={{ marginBottom: 16 }}>
+      <div className="card-head">
+        <div>
+          <h2>What stays on-prem at the end of {fyLabel(settings.horizonFY)}</h2>
+          <p className="sub">Why the remaining <b className="num">{fmt(total)}</b> vCPU / <b className="num">{fmt(totalVms)}</b> VMs ({basis === 'risk' ? 'risk-adjusted' : 'full plan'}) is still on-prem – sizes the next hardware refresh and VMware renewal</p>
+        </div>
+      </div>
+      <div className="meter" style={{ height: 10, marginTop: 0, marginBottom: 14 }} title="Share of remaining vCPU">
+        {rows.map((r) => (r.vcpu > 0 ? <span key={r.id} style={{ width: `${(r.vcpu / (total || 1)) * 100}%`, background: r.color }} /> : null))}
+      </div>
+      <div className="bar-list">
+        {rows.map((r) => (
+          <div className="bar-row bar-row-wide" key={r.id} title={`${r.apps} apps · ${fmt(r.vms)} VMs`}>
+            <div className="lbl"><i className="dot" style={{ background: r.color }} /><span>{r.label}</span></div>
+            <div className="track"><div className="fill" style={{ width: `${(r.vcpu / max) * 100}%`, background: r.color }} /></div>
+            <div className="val num">{fmt(r.vcpu)} vCPU · {total ? Math.round((r.vcpu / total) * 100) : 0}% · {r.apps} apps</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }

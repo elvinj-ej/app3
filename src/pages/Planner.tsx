@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useStore } from '../lib/store';
-import { DISP, DISPOSITIONS } from '../lib/dispositions';
+import { DISPOSITIONS, dispMeta } from '../lib/dispositions';
 import { fyLabel, fyOf, fyQuarterOf, quarterLabel, quarterRange } from '../lib/fy';
 import { groupApps, planFor, scopeVMs, type AppRow } from '../lib/projection';
 import { parseApp, TIER_ORDER } from '../lib/parse';
@@ -22,8 +22,8 @@ const tierRank = (t: string) => {
   return i < 0 ? 99 : i;
 };
 const dispRank = (d: Disposition) => DISPOSITIONS.findIndex((x) => x.id === d);
-const confRank = (p: AppPlan) => (DISP[p.disposition].leavesOnPrem ? (p.confidence ? ['high', 'medium', 'low', 'unknown'].indexOf(p.confidence) : 4) : 5);
-const targetRank = (p: AppPlan) => (p.targetFY ? p.targetFY * 10 + (p.targetQ ?? 4) : 9999);
+const confRank = (p: AppPlan) => (dispMeta(p.disposition).leavesOnPrem ? (p.confidence ? ['high', 'medium', 'low', 'unknown'].indexOf(p.confidence) : 4) : 5);
+const targetRank = (p: AppPlan) => (p.targetFY ? p.targetFY * 10 + (p.targetQ ?? 4) : p.reviewFY ? 5000 + p.reviewFY * 10 + (p.reviewQ ?? 4) : 9999);
 
 export default function Planner() {
   const { inventory, plans, settings, setPlan, setPlans } = useStore();
@@ -62,7 +62,7 @@ export default function Planner() {
   const [historyFor, setHistoryFor] = useState<string | null>(null);
 
   const confMatches = (p: AppPlan) =>
-    !conf || (DISP[p.disposition].leavesOnPrem && (conf === 'unrated' ? !p.confidence : p.confidence === conf));
+    !conf || (dispMeta(p.disposition).leavesOnPrem && (conf === 'unrated' ? !p.confidence : p.confidence === conf));
   const ql = q.trim().toLowerCase();
   const vmMatches = (v: VM) =>
     (!site || v.site === site) &&
@@ -166,9 +166,9 @@ export default function Planner() {
       return {
         VMName: v.name, Application_Primary: v.appKey, Application: a.name, Domain: a.domain, Tier: a.tier,
         Environment: v.environment, VCenter: v.vcenter, VMLocation: v.location, PowerState: v.poweredOn ? 'PoweredOn' : 'PoweredOff',
-        vCPU: v.vcpu, MemoryGB: v.memGB, Disposition: DISP[p.disposition].label,
-        Confidence: DISP[p.disposition].leavesOnPrem ? (p.confidence ? CONFIDENCE_LABEL[p.confidence] : 'Not rated') : '',
-        TargetFY: p.targetFY ? fyLabel(p.targetFY) : '', TargetQuarter: p.targetFY ? `Q${p.targetQ ?? 4}` : '', Notes: p.notes ?? '',
+        vCPU: v.vcpu, MemoryGB: v.memGB, Disposition: dispMeta(p.disposition).label,
+        Confidence: dispMeta(p.disposition).leavesOnPrem ? (p.confidence ? CONFIDENCE_LABEL[p.confidence] : 'Not rated') : '',
+        TargetFY: p.targetFY ? fyLabel(p.targetFY) : '', TargetQuarter: p.targetFY ? `Q${p.targetQ ?? 4}` : '', ReviewBy: p.reviewFY ? quarterLabel(p.reviewFY, p.reviewQ ?? 4) : '', Notes: p.notes ?? '',
       };
     });
     downloadCSV(`footprint-plan-${view}.csv`, rows);
@@ -250,7 +250,7 @@ export default function Planner() {
                   <AppTh k="vcpu" r>vCPU</AppTh>
                   <th>Envs</th>
                   <AppTh k="disposition">Disposition</AppTh>
-                  <AppTh k="target">Off on-prem by (FY · quarter)</AppTh>
+                  <AppTh k="target">Off on-prem by · or review by (FY · quarter)</AppTh>
                   <AppTh k="confidence">Confidence</AppTh>
                   <th style={{ minWidth: 150 }}>Notes</th>
                   <th>Last change</th>
@@ -259,7 +259,7 @@ export default function Planner() {
               <tbody>
                 {apps.map((a) => {
                   const p = planFor(plans, a.key);
-                  const meta = DISP[p.disposition];
+                  const meta = dispMeta(p.disposition);
                   const open = expanded.has(a.key);
                   const subVms = (!site && !env) ? a.vms : a.vms.filter(vmMatches);
                   return (
@@ -339,7 +339,7 @@ export default function Planner() {
                 {vmRows.slice(0, 1500).map((v) => {
                   const a = parseApp(v.appKey);
                   const p = planFor(plans, v.appKey);
-                  const meta = DISP[p.disposition];
+                  const meta = dispMeta(p.disposition);
                   return (
                     <tr key={v.name + v.vcenter}>
                       <td>{v.name}{!v.poweredOn && <span className="chip" style={{ marginLeft: 6 }}>Off</span>}</td>
@@ -394,11 +394,11 @@ function HistoryModal({ appKey, onClose }: { appKey: string; onClose: () => void
 
 const tKey = (fy?: number, q?: number) => (fy ? `${fy}-${q ?? 4}` : '');
 
-function TargetSelect({ value, options, onChange, placeholder, small = true }: { value: string; options: { fy: number; q: number }[]; onChange: (v: string) => void; placeholder: string; small?: boolean }) {
+function TargetSelect({ value, options, onChange, placeholder, small = true, ariaLabel = 'Target FY and quarter' }: { value: string; options: { fy: number; q: number }[]; onChange: (v: string) => void; placeholder: string; small?: boolean; ariaLabel?: string }) {
   const hasValue = !value || options.some((o) => tKey(o.fy, o.q) === value);
   const fys = [...new Set(options.map((o) => o.fy))];
   return (
-    <select className={`select${small ? ' select-sm' : ''}`} value={value} onChange={(e) => onChange(e.target.value)} aria-label="Target FY and quarter">
+    <select className={`select${small ? ' select-sm' : ''}`} value={value} onChange={(e) => onChange(e.target.value)} aria-label={ariaLabel}>
       <option value="">{placeholder}</option>
       {!hasValue && <option value={value}>{quarterLabel(Number(value.split('-')[0]), Number(value.split('-')[1]))} (past)</option>}
       {fys.map((fy) => (
@@ -413,8 +413,23 @@ function TargetSelect({ value, options, onChange, placeholder, small = true }: {
 }
 
 function TargetPicker({ plan, options, onChange }: { plan: AppPlan; options: { fy: number; q: number }[]; onChange: (p: Partial<AppPlan>) => void }) {
-  const leaves = DISP[plan.disposition].leavesOnPrem;
-  if (!leaves) return <span className="muted">{plan.disposition === 'tbd' ? '—' : 'Stays on-prem'}</span>;
+  const meta = dispMeta(plan.disposition);
+  if (meta.group === 'Retain') {
+    return (
+      <div title="Optional – when this stay-on-prem decision should be re-assessed. Does not change the forecast.">
+        <TargetSelect value={tKey(plan.reviewFY, plan.reviewQ)} options={options} placeholder="Stays · review by… (optional)" ariaLabel="Review by"
+          onChange={(val) => {
+            if (!val) onChange({ reviewFY: null, reviewQ: null } as unknown as Partial<AppPlan>);
+            else {
+              const [fy, q] = val.split('-').map(Number);
+              onChange({ reviewFY: fy, reviewQ: q as Quarter });
+            }
+          }} />
+        {plan.reviewFY ? <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>Stays on-prem · review due</div> : null}
+      </div>
+    );
+  }
+  if (!meta.leavesOnPrem) return <span className="muted">—</span>;
   const v = tKey(plan.targetFY, plan.targetQ);
   return (
     <div style={!plan.targetFY ? { outline: '1px solid var(--warn-ink)', borderRadius: 6, display: 'inline-block' } : undefined}>
@@ -431,7 +446,7 @@ function TargetPicker({ plan, options, onChange }: { plan: AppPlan; options: { f
 }
 
 function ConfidencePicker({ plan, weights, onChange }: { plan: AppPlan; weights: ConfidenceWeights; onChange: (c: Confidence | undefined) => void }) {
-  if (!DISP[plan.disposition].leavesOnPrem) return <span className="muted">—</span>;
+  if (!dispMeta(plan.disposition).leavesOnPrem) return <span className="muted">—</span>;
   const c = plan.confidence;
   const meta = CONFIDENCE.find((x) => x.id === c);
   return (
@@ -464,6 +479,7 @@ function BulkBar({ count, options, onApply, onClear }: { count: number; options:
   const [d, setD] = useState<Disposition | ''>('');
   const [t, setT] = useState('');
   const [c, setC] = useState('');
+  const [rv, setRv] = useState('');
   return (
     <div className="bulkbar">
       <b>{count} selected</b>
@@ -477,7 +493,8 @@ function BulkBar({ count, options, onApply, onClear }: { count: number; options:
         {CONFIDENCE.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
         <option value="clear">Clear (not rated)</option>
       </select>
-      <button className="btn btn-sm" disabled={!d && !t && !c}
+      <TargetSelect value={rv} options={options} onChange={setRv} placeholder="Review by (stay-on-prem apps)" ariaLabel="Bulk review by" />
+      <button className="btn btn-sm" disabled={!d && !t && !c && !rv}
         onClick={() => {
           const patch: Partial<AppPlan> = {};
           if (d) patch.disposition = d;
@@ -487,6 +504,11 @@ function BulkBar({ count, options, onApply, onClear }: { count: number; options:
             patch.targetQ = q as Quarter;
           }
           if (c) patch.confidence = (c === 'clear' ? null : c) as Confidence;
+          if (rv) {
+            const [fy, q] = rv.split('-').map(Number);
+            patch.reviewFY = fy;
+            patch.reviewQ = q as Quarter;
+          }
           onApply(patch);
         }}>Apply to {count}</button>
       <button className="btn btn-sm" onClick={onClear} style={{ marginLeft: 'auto' }}>Clear selection</button>

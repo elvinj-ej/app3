@@ -20,9 +20,15 @@ export const DISPOSITIONS: DispositionMeta[] = [
   { id: 'rehost_aws', label: 'Lift & Shift → AWS', short: 'Lift & Shift AWS', group: 'Cloud', leavesOnPrem: true, color: 'var(--s5)', help: 'Rehost VMs as-is onto AWS (EC2 / EVS)' },
   { id: 'retain_sovereignty', label: 'Stay On-Prem – Data Sovereignty', short: 'On-Prem (Sovereignty)', group: 'Retain', leavesOnPrem: false, color: 'var(--s6)', help: 'Must remain on-prem: data residency / sovereignty' },
   { id: 'retain_latency', label: 'Stay On-Prem – Latency', short: 'On-Prem (Latency)', group: 'Retain', leavesOnPrem: false, color: 'var(--s7)', help: 'Must remain on-prem: latency-bound (e.g. manufacturing, OT)' },
+  { id: 'retain_maintain', label: 'Stay On-Prem – Maintain', short: 'On-Prem (Maintain)', group: 'Retain', leavesOnPrem: false, color: 'var(--s8)', help: 'Keep on-prem – no migration planned; not sovereignty- or latency-bound' },
   { id: 'tbd', label: 'Not yet decided', short: 'Undecided', group: 'Undecided', leavesOnPrem: false, color: 'var(--s-tbd)', help: 'No disposition captured yet' },
 ];
 
 export const DISP: Record<Disposition, DispositionMeta> = Object.fromEntries(
   DISPOSITIONS.map((d) => [d.id, d]),
 ) as Record<Disposition, DispositionMeta>;
+
+/** Metadata for a disposition; unknown values (e.g. from a newer version) are treated as Undecided. */
+export function dispMeta(id: string | undefined): DispositionMeta {
+  return (id && DISP[id as Disposition]) || DISP.tbd;
+}

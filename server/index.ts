@@ -63,7 +63,7 @@ class HttpError extends Error {
 
 const VALID_CONF = new Set(['high', 'medium', 'low', 'unknown']);
 
-function cleanPlan(input: Partial<AppPlan>): Pick<AppPlan, 'disposition' | 'targetFY' | 'targetQ' | 'notes' | 'confidence'> {
+function cleanPlan(input: Partial<AppPlan>): Pick<AppPlan, 'disposition' | 'targetFY' | 'targetQ' | 'notes' | 'confidence' | 'reviewFY' | 'reviewQ'> {
   const disposition = (input.disposition ?? 'tbd') as Disposition;
   if (!VALID_DISP.has(disposition)) throw new HttpError(400, `Unknown disposition: ${disposition}`);
   let targetFY: number | undefined = input.targetFY == null ? undefined : Number(input.targetFY);
@@ -79,7 +79,17 @@ function cleanPlan(input: Partial<AppPlan>): Pick<AppPlan, 'disposition' | 'targ
   let confidence = input.confidence ? String(input.confidence) as AppPlan['confidence'] : undefined;
   if (confidence && !VALID_CONF.has(confidence)) throw new HttpError(400, `Unknown confidence: ${confidence}`);
   if (!keep) confidence = undefined;
-  return { disposition, targetFY, targetQ: targetFY ? (targetQ ?? 4) : undefined, notes, confidence };
+  // Review-by quarter: only for applications that stay on-prem.
+  const retains = DISPOSITIONS.find((d) => d.id === disposition)!.group === 'Retain';
+  let reviewFY: number | undefined = input.reviewFY == null ? undefined : Number(input.reviewFY);
+  if (reviewFY !== undefined && (!Number.isInteger(reviewFY) || reviewFY < 20 || reviewFY > 99)) throw new HttpError(400, 'reviewFY must be a 2-digit FY number');
+  let reviewQ = input.reviewQ == null ? undefined : (Number(input.reviewQ) as AppPlan['reviewQ']);
+  if (reviewQ !== undefined && ![1, 2, 3, 4].includes(reviewQ)) throw new HttpError(400, 'reviewQ must be 1-4');
+  if (!retains) {
+    reviewFY = undefined;
+    reviewQ = undefined;
+  }
+  return { disposition, targetFY, targetQ: targetFY ? (targetQ ?? 4) : undefined, notes, confidence, reviewFY, reviewQ: reviewFY ? (reviewQ ?? 4) : undefined };
 }
 
 function appTotals(inv: Inventory | null) {

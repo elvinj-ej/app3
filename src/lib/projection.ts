@@ -1,4 +1,4 @@
-import { DISP, DISPOSITIONS } from './dispositions.ts';
+import { DISP, DISPOSITIONS, dispMeta } from './dispositions.ts';
 import { fyEnd, fyLabel, fyOf, fyQuarterEnd, fyQuarterOf, quarterLabel } from './fy.ts';
 import { parseApp } from './parse.ts';
 import type { AppInfo, AppPlan, ConfidenceWeights, Disposition, PlanMap, Settings, VM } from './types.ts';
@@ -7,12 +7,15 @@ import { DEFAULT_WEIGHTS, moveWeight } from './defaults.ts';
 export const DEFAULT_PLAN: AppPlan = { disposition: 'tbd' };
 
 export function planFor(plans: PlanMap, key: string): AppPlan {
-  return plans[key] ?? DEFAULT_PLAN;
+  const p = plans[key];
+  if (!p) return DEFAULT_PLAN;
+  // Unknown treatment (e.g. written by a newer version) – treat as Undecided instead of failing.
+  return DISP[p.disposition] ? p : { ...p, disposition: 'tbd' };
 }
 
 /** The date an application is treated as gone from on-prem, or null if it stays / is unscheduled. */
 export function exitDate(plan: AppPlan): Date | null {
-  if (!DISP[plan.disposition].leavesOnPrem || !plan.targetFY) return null;
+  if (!dispMeta(plan.disposition).leavesOnPrem || !plan.targetFY) return null;
   return fyQuarterEnd(plan.targetFY, plan.targetQ ?? 4);
 }
 
@@ -187,7 +190,7 @@ export function byDisposition(vms: VM[], plans: PlanMap): DispositionSummary[] {
     s.vms++;
     s.vcpu += v.vcpu;
     s.appSet.add(v.appKey);
-    if (DISP[p.disposition].leavesOnPrem && !p.targetFY) s.unscheduledVms++;
+    if (dispMeta(p.disposition).leavesOnPrem && !p.targetFY) s.unscheduledVms++;
   }
   return [...m.values()].map(({ appSet, ...s }) => ({ ...s, apps: appSet.size }));
 }
@@ -221,4 +224,49 @@ export function groupApps(vms: VM[]): AppRow[] {
     if (!r.owner && v.owner) r.owner = v.owner;
   }
   return [...m.values()];
+}
+
+export interface StayBucket {
+  id: 'retain_sovereignty' | 'retain_latency' | 'retain_maintain' | 'tbd' | 'unscheduled' | 'risk';
+  label: string;
+  color: string;
+  vms: number;
+  vcpu: number;
+  apps: number;
+}
+
+/**
+ * Why the footprint is still on-prem at a date (default: end of the horizon FY).
+ * The buckets add up to the headline remaining footprint for the chosen basis.
+ */
+export function whatStays(vms: VM[], plans: PlanMap, settings: Settings, basis: 'risk' | 'plan', at: Date = fyEnd(settings.horizonFY)): StayBucket[] {
+  const w = settings.confidenceWeights ?? DEFAULT_WEIGHTS;
+  const defs: Omit<StayBucket, 'vms' | 'vcpu' | 'apps'>[] = [
+    { id: 'retain_sovereignty', label: 'Stay – Data Sovereignty', color: 'var(--s6)' },
+    { id: 'retain_latency', label: 'Stay – Latency', color: 'var(--s7)' },
+    { id: 'retain_maintain', label: 'Stay – Maintain', color: 'var(--s8)' },
+    { id: 'tbd', label: 'Undecided', color: 'var(--s-tbd)' },
+    { id: 'unscheduled', label: 'Moving, but no target or after horizon', color: 'var(--text-3)' },
+    { id: 'risk', label: 'Scheduled moves at risk (confidence shortfall)', color: 'var(--c-low)' },
+  ];
+  const acc = new Map(defs.map((d) => [d.id, { ...d, vms: 0, vcpu: 0, apps: 0, set: new Set<string>() }]));
+  const add = (id: StayBucket['id'], v: VM, f: number) => {
+    if (f <= 0) return;
+    const r = acc.get(id)!;
+    r.vms += f;
+    r.vcpu += v.vcpu * f;
+    r.set.add(v.appKey);
+  };
+  for (const v of vms) {
+    const p = planFor(plans, v.appKey);
+    const m = dispMeta(p.disposition);
+    if (!m.leavesOnPrem) {
+      add(p.disposition === 'tbd' ? 'tbd' : (p.disposition as StayBucket['id']), v, 1);
+      continue;
+    }
+    const d = exitDate(p);
+    if (!d || d > at) add('unscheduled', v, 1);
+    else if (basis === 'risk') add('risk', v, 1 - moveWeight(p.confidence, w));
+  }
+  return [...acc.values()].map(({ set, ...r }) => ({ ...r, apps: set.size }));
 }

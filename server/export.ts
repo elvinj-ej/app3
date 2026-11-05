@@ -1,7 +1,7 @@
 import writeExcelFile from 'write-excel-file/node';
-import { DISP, DISPOSITIONS } from '../src/lib/dispositions.ts';
+import { DISPOSITIONS, dispMeta } from '../src/lib/dispositions.ts';
 import { fyLabel, fyOf, fyQuarterEnd, parseISODate, quarterLabel, quarterRange } from '../src/lib/fy.ts';
-import { byDisposition, exitDate, exitsBy, footprintScenarios, groupApps, periods, planFor, scopeVMs, totals, trend } from '../src/lib/projection.ts';
+import { byDisposition, exitDate, exitsBy, footprintScenarios, groupApps, periods, planFor, scopeVMs, totals, trend, whatStays } from '../src/lib/projection.ts';
 import { CONFIDENCE, CONFIDENCE_LABEL, VENDOR_LABEL, deadlineVendor, moveWeight, vendorOf } from '../src/lib/defaults.ts';
 import { addCharts, type ChartDef } from './charts.ts';
 import { APP_NAME } from '../src/lib/brand.ts';
@@ -56,9 +56,9 @@ export async function buildTreatmentWorkbook(input: {
   const treatment = sheet(
     'Treatment plan',
     ['Application_Primary', 'Application', 'Domain', 'Tier', 'Service', 'Owner', 'VMs', 'Powered-on VMs', 'vCPU', 'vRAM (GB)', 'Storage (GB)',
-      'Environments', 'vCenters', 'Treatment', 'Treatment group', 'Target FY', 'Target quarter', 'Target period', 'Off on-prem by', 'Confidence', 'Counted as moved (risk-adj.)', 'Notes', 'Last updated by', 'Last updated'],
+      'Environments', 'vCenters', 'Treatment', 'Treatment group', 'Target FY', 'Target quarter', 'Target period', 'Off on-prem by', 'Confidence', 'Counted as moved (risk-adj.)', 'Review by', 'Notes', 'Last updated by', 'Last updated'],
     appRows.map(({ a, p, exit }) => {
-      const m = DISP[p.disposition];
+      const m = dispMeta(p.disposition);
       const scheduled = m.leavesOnPrem && p.targetFY;
       return [
         S(a.key), S(a.name), S(a.domain), S(a.tier), S(a.service), S(a.owner), N(a.vmCount), N(a.vms.filter((v) => v.poweredOn).length),
@@ -70,10 +70,11 @@ export async function buildTreatmentWorkbook(input: {
         D(exit),
         S(scheduled ? (p.confidence ? CONFIDENCE_LABEL[p.confidence] : 'Not rated') : ''),
         scheduled ? { value: moveWeight(p.confidence, W8), type: Number, format: '0%' } : null,
+        S(p.reviewFY ? `${quarterLabel(p.reviewFY, p.reviewQ ?? 4)} (${quarterRange(p.reviewFY, p.reviewQ ?? 4)})` : ''),
         S(p.notes), S(p.updatedBy), DT(p.updatedAt),
       ];
     }),
-    [48, 28, 10, 9, 28, 22, 7, 9, 7, 9, 10, 18, 12, 28, 14, 12, 9, 26, 13, 11, 12, 40, 18, 17],
+    [48, 28, 10, 9, 28, 22, 7, 9, 7, 9, 10, 18, 12, 28, 14, 12, 9, 26, 13, 11, 12, 24, 40, 18, 17],
   );
 
   // 2. Quarterly roadmap
@@ -102,7 +103,7 @@ export async function buildTreatmentWorkbook(input: {
       .filter(({ exit }) => exit)
       .map(({ a, p }) => [
         S(quarterLabel(p.targetFY!, p.targetQ ?? 4)), S(quarterRange(p.targetFY!, p.targetQ ?? 4)), S(a.name), S(a.domain),
-        S(DISP[p.disposition].label), S(p.confidence ? CONFIDENCE_LABEL[p.confidence] : 'Not rated'), N(a.vmCount), N(a.vcpu), S(p.notes),
+        S(dispMeta(p.disposition).label), S(p.confidence ? CONFIDENCE_LABEL[p.confidence] : 'Not rated'), N(a.vmCount), N(a.vcpu), S(p.notes),
       ]),
     [12, 16, 32, 10, 28, 11, 7, 7, 40],
   );
@@ -119,7 +120,7 @@ export async function buildTreatmentWorkbook(input: {
         const ex = exitDate(p);
         return [
           S(v.name), S(v.poweredOn ? 'PoweredOn' : 'PoweredOff'), S(v.appKey), S(a.domain), S(a.tier), S(v.environment), S(v.vcenter),
-          S(v.location), S(v.os), N(v.vcpu), N(v.memGB), N(Math.round(v.storageProvGB)), S(DISP[p.disposition].label),
+          S(v.location), S(v.os), N(v.vcpu), N(v.memGB), N(Math.round(v.storageProvGB)), S(dispMeta(p.disposition).label),
           S(ex ? quarterLabel(p.targetFY!, p.targetQ ?? 4) : ''), D(ex),
         ];
       }),
@@ -133,10 +134,11 @@ export async function buildTreatmentWorkbook(input: {
   // 6. Change log
   const fmtPlan = (p: HistoryEntry['before']) => {
     if (!p) return '';
-    const m = p.disposition ? DISP[p.disposition]?.label ?? p.disposition : '';
+    const m = p.disposition ? dispMeta(p.disposition).label : '';
     const t = p.targetFY ? ` · ${quarterLabel(p.targetFY, p.targetQ ?? 4)}` : '';
     const c = p.confidence ? ` · ${CONFIDENCE_LABEL[p.confidence]} confidence` : '';
-    return `${m}${t}${c}${p.notes ? ` · ${p.notes}` : ''}`;
+    const rv = p.reviewFY ? ` · review ${quarterLabel(p.reviewFY, p.reviewQ ?? 4)}` : '';
+    return `${m}${t}${c}${rv}${p.notes ? ` · ${p.notes}` : ''}`;
   };
   const changeLog = sheet(
     'Change log',
@@ -216,6 +218,14 @@ export async function buildTreatmentWorkbook(input: {
     ex.push([C(`${d.label}${vendor ? ` (on ${VENDOR_LABEL[vendor]} clusters)` : ''}`), D(at), C(`${fyLabel(fyOf(at))} · ${d.confirmed ? 'confirmed' : 'date to confirm'}`), N(Math.round(fp.risk.vms)), N(Math.round(fp.risk.vcpu)), N(fp.plan.vcpu), N(fp.committed.vcpu)]);
   }
   ex.push([]);
+  ex.push([TH(`What stays on-prem at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()})`), TH('Apps'), TH('VMs'), TH('vCPU'), TH('% of remaining')]);
+  {
+    const ws = whatStays(vms, plans, settings, isRisk ? 'risk' : 'plan').filter((r) => isRisk || r.id !== 'risk');
+    const tot = ws.reduce((a, r) => a + r.vcpu, 0);
+    for (const r of ws) ex.push([C(r.label), N(r.apps), N(Math.round(r.vms)), N(Math.round(r.vcpu)), { value: tot ? r.vcpu / tot : 0, type: Number, format: '0%' }]);
+    ex.push([B('Total remaining'), null, N(Math.round(ws.reduce((a, r) => a + r.vms, 0))), N(Math.round(tot)), null]);
+  }
+  ex.push([]);
   ex.push([TH('Confidence (scheduled moves)'), TH('Apps'), TH('VMs'), TH('vCPU'), TH('Weight')]);
   {
     const acc: Record<string, { apps: Set<string>; vms: number; vcpu: number }> = {};
@@ -269,7 +279,7 @@ export async function buildTreatmentWorkbook(input: {
   const W = 9, Hrows = 20, col0 = 8;
   const pos = (i: number) => ({ col: col0 + (i % 2) * (W + 0), row: 3 + Math.floor(i / 2) * (Hrows + 1), cols: W, rows: Hrows });
   const COL = { vm: '2A78D6', vcpu: 'EB6834' };
-  const SLOT: Record<string, string> = { retire: '2A78D6', saas: 'EB6834', modernize_aws: '1BAF7A', modernize_azure: 'EDA100', rehost_aws: 'E87BA4', retain_sovereignty: '008300', retain_latency: '6250D6', tbd: 'B9B8B0' };
+  const SLOT: Record<string, string> = { retire: '2A78D6', saas: 'EB6834', modernize_aws: '1BAF7A', modernize_azure: 'EDA100', rehost_aws: 'E87BA4', retain_sovereignty: '008300', retain_latency: '6250D6', retain_maintain: 'E34948', tbd: 'B9B8B0' };
   const charts: ChartDef[] = [
     { type: 'line', title: `On-prem footprint by quarter, ${bName.toLowerCase()} (% of today)`, catRef: rng('A', tq.length), categories: qCats, numFmt: '0"%"', yMax: 100,
       series: [
@@ -299,7 +309,7 @@ export async function buildTreatmentWorkbook(input: {
   const sheets = [execSheet, treatment, roadmap, byQuarter, vmSheet, changeLog, uploadSheet, chartData];
   if (orphans.length) {
     sheets.push(sheet('Unmatched decisions', ['Application_Primary (not in latest inventory)', 'Treatment', 'Target period', 'Notes', 'Last updated by'],
-      orphans.map(([k, p]) => [S(k), S(DISP[p.disposition].label), S(p.targetFY ? quarterLabel(p.targetFY, p.targetQ ?? 4) : ''), S(p.notes), S(p.updatedBy)]),
+      orphans.map(([k, p]) => [S(k), S(dispMeta(p.disposition).label), S(p.targetFY ? quarterLabel(p.targetFY, p.targetQ ?? 4) : ''), S(p.notes), S(p.updatedBy)]),
       [52, 28, 12, 40, 20]));
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
