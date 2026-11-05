@@ -3,6 +3,7 @@ import { defaultVendor, useStore, vendorOf } from '../lib/store';
 import { fyLabel } from '../lib/fy';
 import type { ConfidenceWeights, Deadline, HwVendor, PlanMap } from '../lib/types';
 import { DEFAULT_WEIGHTS } from '../lib/defaults';
+import { newId } from '../lib/api';
 
 export default function SettingsPage() {
   const { inventory, settings, updateSettings, importPlans, toast } = useStore();
@@ -93,7 +94,7 @@ export default function SettingsPage() {
         <div className="card-head">
           <div><h2>Deadlines</h2><p className="sub">Shown on the executive summary and marked on the timeline. Tick “confirmed” once the contract date is verified.</p></div>
           <div className="filters">
-            <button className="btn btn-sm" onClick={() => setDraft([...deadlines, { id: crypto.randomUUID(), label: 'New deadline', date: new Date().toISOString().slice(0, 10), kind: 'Other', confirmed: false }])}>+ Add deadline</button>
+            <button className="btn btn-sm" onClick={() => setDraft([...deadlines, { id: newId(), label: 'New deadline', date: new Date().toISOString().slice(0, 10), kind: 'Other', confirmed: false }])}>+ Add deadline</button>
             {dirty && <button className="btn btn-sm" onClick={() => setDraft(null)}>Discard</button>}
             <button className="btn btn-sm btn-primary" disabled={!dirty} onClick={async () => { await updateSettings({ deadlines }); setDraft(null); toast('Deadlines saved'); }}>Save deadlines</button>
           </div>

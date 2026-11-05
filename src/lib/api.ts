@@ -35,3 +35,13 @@ export async function api<T>(path: string, opts: { method?: string; json?: unkno
   if (!res.ok) throw new ApiError(res.status, String(data.error ?? res.statusText), data);
   return data as T;
 }
+
+/** Unique id that also works on plain-HTTP intranet addresses, where crypto.randomUUID() is unavailable. */
+export function newId(): string {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  } catch {
+    /* fall through */
+  }
+  return `id-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
