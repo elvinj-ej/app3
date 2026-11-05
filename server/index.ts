@@ -459,6 +459,12 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK'] as const) {
   ]);
   if (n) console.log(`  Added ${n} application mapping rules (v2.7)`);
 }
+{
+  const n = store.seedRules('seed_rules_2026_11_c', [
+    { kind: 'merge', source: 'Terraform - Tier0', target: 'Terraform - Tier0 - ISD (Server OS Orchestration Services)', components: false, note: 'Duplicate Terraform label', createdBy: SEED_BY },
+  ]);
+  if (n) console.log(`  Added ${n} application mapping rule (Terraform)`);
+}
 
 /** Earlier versions did not store the RVTools utilisation columns – re-read them from the stored original files once. */
 async function backfillUsage() {
