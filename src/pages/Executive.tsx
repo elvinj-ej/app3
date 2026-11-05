@@ -605,13 +605,13 @@ function VmCountCard() {
   const { inventory, plans, settings } = useStore();
   const all = inventory.vms;
   const on = all.filter((v) => v.poweredOn).length;
-  const virt = all.filter((v) => planFor(plans, v.appKey).disposition === 'virt_resource').length;
+  const virt = scopeVMs(all, settings).filter((v) => planFor(plans, v.appKey).disposition === 'virt_resource').length;
   const planned = scopeVMs(all, settings, plans).length;
   return (
     <div className="card kpi">
       <div className="k-label">VMs on-prem today</div>
-      <div className="k-value num">{fmt(all.length)}<small>total VMs</small></div>
-      <div className="k-foot">{fmt(on)} powered on · {fmt(all.length - on)} powered off</div>
+      <div className="k-value num">{fmt(on)}<small>powered-on VMs</small></div>
+      <div className="k-foot">{fmt(all.length)} total · {fmt(all.length - on)} powered off</div>
       <div className="k-foot">{fmt(planned)} in the plan{virt ? ` · ${fmt(virt)} virtualization resources excluded` : ''}</div>
     </div>
   );
