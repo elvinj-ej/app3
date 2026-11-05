@@ -15,7 +15,8 @@ WHAT'S IN THE FOLDER
   server.mjs    the application server (API + web app, all libraries bundled)
   app\          the web pages
   data\         created on first start - footprint.db holds ALL decisions, history,
-                settings and every uploaded VMInfo file. BACK THIS FOLDER UP.
+                settings and every uploaded VMInfo file. BACK THIS FILE UP
+                (it is a single self-contained file - safe to copy while running).
 
 FIRST USE
   1. Open the URL, enter your name (recorded against your changes).

@@ -63,7 +63,7 @@ export default function SettingsPage() {
         <div className="card card-pad">
           <div className="card-head"><div><h2>Backup &amp; import</h2><p className="sub">The database file is <code>data/footprint.db</code> on the server – back it up like any file.</p></div></div>
           <div className="filters">
-            <a className="btn" href="api/export/treatment-plan.xlsx">Export treatment plan (Excel)</a>
+            <a className="btn" href="api/export/treatment-plan.xlsx">Export to Excel (with charts)</a>
             <a className="btn" href="api/backup">Download decisions backup (JSON)</a>
             <button className="btn" onClick={() => planRef.current?.click()}>Import decisions (JSON)…</button>
             <input ref={planRef} type="file" accept=".json" hidden onChange={async (e) => {

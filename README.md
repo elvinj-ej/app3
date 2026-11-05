@@ -16,7 +16,7 @@ FY runs **1 July – 30 June** (FY27 = Jul 2026 – Jun 2027). Q1 = Jul–Sep, Q
 
 The package contains `server.mjs` (the API server with every library bundled in), `app/` (the web pages) and
 `data/footprint.db`, which is created on first start. The database holds every decision, the change history, the
-settings and each uploaded VMInfo file, so **back up the `data` folder**. To upgrade, replace `server.mjs` and `app/`
+settings and each uploaded VMInfo file, so **back up that file**. It is a single self-contained file and safe to copy while the server is running. To upgrade, replace `server.mjs` and `app/`
 and keep `data/`.
 
 ## Pages
@@ -29,10 +29,11 @@ and keep `data/`.
 | **Activity** | Change log of every decision (who, when, before and after), filterable by person and application. |
 | **Settings** | Planning horizon, whether powered-off VMs count, deadlines (VMware, Cisco or Lenovo hardware, or your own), cluster-to-vendor mapping, a JSON backup, and decision import. You can also import decisions saved in a browser by the earlier browser-only version. |
 
-**Export treatment plan (Excel)**, available on every main page, produces one workbook with these sheets: Summary;
+**Export to Excel (with charts)**, available on every main page, produces one workbook. Its first sheet, **Executive Summary**, holds the key figures, deadlines with the projected footprint on each date, the treatment mix, domain and hardware tables, and six **native Excel charts**: footprint by quarter as % of today, vCPU leaving per quarter by treatment, vCPU and VMs remaining by quarter, vCPU at each FY end, and vCPU by treatment. The charts are editable and read from a *Chart data* sheet, and the Executive Summary sheet prints on one landscape page width. The remaining sheets are:
 Treatment plan (one row per application: treatment, target FY, quarter, period, the date it's off on-prem by, notes,
 who changed it last); Quarterly roadmap (apps, VMs and vCPU leaving and remaining per quarter, split by treatment);
-Apps by quarter; VMs; Change log; Inventory uploads; and Unmatched decisions.
+Apps by quarter; VMs; Change log; Inventory uploads; Chart data; and Unmatched decisions.
+The dashboard also has a **Print / Save as PDF** button that lays the executive summary out on A4 landscape pages.
 
 ### Treatments
 

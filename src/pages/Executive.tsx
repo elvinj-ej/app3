@@ -74,7 +74,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
             year: <b>{fyLabel(settings.currentFY)}</b>.
           </p>
         </div>
-        <div className="filters">
+        <div className="filters no-print">
           <div className="seg" role="group" aria-label="Timeline granularity">
             <button aria-pressed={gran === 'quarter'} onClick={() => setGran('quarter')}>By quarter</button>
             <button aria-pressed={gran === 'fy'} onClick={() => setGran('fy')}>By FY</button>
@@ -87,7 +87,8 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
             />
             Include powered-off VMs ({inventory.vms.filter((v) => !v.poweredOn).length})
           </label>
-          <a className="btn" href="api/export/treatment-plan.xlsx">Export treatment plan (Excel)</a>
+          <button className="btn" onClick={printSummary}>Print / Save as PDF</button>
+          <a className="btn btn-primary" href="api/export/treatment-plan.xlsx" title="Executive summary with charts, treatment plan, quarterly roadmap, VMs and change log">Export to Excel (with charts)</a>
         </div>
       </div>
 
@@ -544,4 +545,20 @@ function UpcomingMoves() {
       )}
     </div>
   );
+}
+
+/** Lay the page out at A4-landscape width, let the charts re-measure, then open the print dialog. */
+export function printSummary() {
+  const html = document.documentElement;
+  const prevTheme = html.getAttribute('data-theme');
+  html.setAttribute('data-theme', 'light');
+  html.classList.add('printing');
+  const done = () => {
+    html.classList.remove('printing');
+    if (prevTheme) html.setAttribute('data-theme', prevTheme);
+    else html.removeAttribute('data-theme');
+    window.removeEventListener('afterprint', done);
+  };
+  window.addEventListener('afterprint', done);
+  setTimeout(() => window.print(), 900);
 }

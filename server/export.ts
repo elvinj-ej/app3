@@ -1,11 +1,14 @@
 import writeExcelFile from 'write-excel-file/node';
 import { DISP, DISPOSITIONS } from '../src/lib/dispositions.ts';
-import { fyLabel, fyQuarterEnd, quarterLabel, quarterRange } from '../src/lib/fy.ts';
-import { exitDate, exitsBy, footprintAt, groupApps, periods, planFor, scopeVMs } from '../src/lib/projection.ts';
+import { fyLabel, fyOf, fyQuarterEnd, parseISODate, quarterLabel, quarterRange } from '../src/lib/fy.ts';
+import { byDisposition, exitDate, exitsBy, footprintAt, groupApps, periods, planFor, scopeVMs, totals, trend } from '../src/lib/projection.ts';
+import { vendorOf } from '../src/lib/defaults.ts';
+import { addCharts, type ChartDef } from './charts.ts';
+import { APP_NAME } from '../src/lib/brand.ts';
 import { parseApp } from '../src/lib/parse.ts';
 import type { HistoryEntry, Inventory, PlanMap, Settings, UploadMeta } from '../src/lib/types.ts';
 
-type Cell = { value?: unknown; type?: unknown; format?: string; fontWeight?: 'bold'; backgroundColor?: string; color?: string; wrap?: boolean } | null;
+type Cell = { value?: unknown; type?: unknown; format?: string; fontWeight?: 'bold'; fontSize?: number; backgroundColor?: string; color?: string; wrap?: boolean } | null;
 type Row = Cell[];
 
 const H = (v: string): Cell => ({ value: v, fontWeight: 'bold', backgroundColor: '#1F4E79', color: '#FFFFFF' });
@@ -141,32 +144,123 @@ export async function buildTreatmentWorkbook(input: {
     [9, 36, 20, 17, 30, 7, 10, 7, 12, 10, 11, 10, 12],
   );
 
-  const summary = sheet(
-    'Summary',
-    ['Item', 'Value'],
-    [
-      [S('Generated'), DT(new Date().toISOString())],
-      [S('Inventory'), S(inventory ? `${inventory.sourceFile} (upload #${inventory.uploadId}, ${inventory.uploadedBy})` : 'No inventory uploaded')],
-      [S('Footprint basis'), S(scopeNote)],
-      [S('Current FY'), S(fyLabel(settings.currentFY))],
-      [S('Horizon'), S(`to end of ${fyLabel(settings.horizonFY)}`)],
-      [S('VMs today'), N(vms.length)],
-      [S('vCPU today'), N(vms.reduce((s, v) => s + v.vcpu, 0))],
-      [S(`VMs remaining end ${fyLabel(settings.horizonFY)}`), N(footprintAt(vms, plans, fyQuarterEnd(settings.horizonFY, 4)).vms)],
-      [S(`vCPU remaining end ${fyLabel(settings.horizonFY)}`), N(footprintAt(vms, plans, fyQuarterEnd(settings.horizonFY, 4)).vcpu)],
-      [S('Applications'), N(apps.length)],
-      [S('Applications with a decision'), N(apps.filter((a) => planFor(plans, a.key).disposition !== 'tbd').length)],
-      ...settings.deadlines.map((d) => [S(`${d.label}${d.confirmed ? '' : ' (date to confirm)'}`), D(d.date)]),
-    ],
-    [44, 60],
-  );
+  // ---------- Executive summary (tables + native charts) & chart data ----------
+  const base = totals(vms);
+  const endT = footprintAt(vms, plans, fyQuarterEnd(settings.horizonFY, 4));
+  const decided = apps.filter((a) => planFor(plans, a.key).disposition !== 'tbd');
+  const decidedVcpu = vms.filter((v) => planFor(plans, v.appKey).disposition !== 'tbd').reduce((x, v) => x + v.vcpu, 0);
 
-  const sheets = [summary, treatment, roadmap, byQuarter, vmSheet, changeLog, uploadSheet];
+  const tq = trend(vms, plans, settings, 'quarter');
+  const tf = trend(vms, plans, settings, 'fy');
+  const disp = byDisposition(vms, plans);
+
+  // Chart data sheet layout (1-based rows; row 1 = headers)
+  const CD = "'Chart data'";
+  const rng = (col: string, n: number) => `${CD}!$${col}$2:$${col}$${n + 1}`;
+  const leaveCols = ['L', 'M', 'N', 'O', 'P'];
+  const cdHeader = ['Period', 'VMs remaining', 'vCPU remaining', 'VMs % of today', 'vCPU % of today', '', 'FY', 'VMs remaining', 'vCPU remaining', '', 'Quarter',
+    ...leaving.map((d) => `vCPU leaving – ${d.short}`), 'vCPU leaving – total', '', 'Treatment', 'vCPU', 'VMs', 'Apps'];
+  const nRows = Math.max(tq.length, tf.length, exitsV.length, DISPOSITIONS.length);
+  const cdRows: Row[] = [];
+  for (let r = 0; r < nRows; r++) {
+    const q = tq[r], f = tf[r], e = exitsV[r], dm = DISPOSITIONS[r];
+    const ds = dm ? disp.find((x) => x.id === dm.id)! : null;
+    cdRows.push([
+      q ? S(q.label) : null, q ? N(q.vms) : null, q ? N(q.vcpu) : null, q ? N(q.vmsPct) : null, q ? N(q.vcpuPct) : null, null,
+      f ? S(f.label === 'Now' ? 'Now' : `End ${f.label}`) : null, f ? N(f.vms) : null, f ? N(f.vcpu) : null, null,
+      e ? S(e.label) : null, ...leaving.map((d) => (e ? N(e[d.id] ?? 0) : null)), e ? N(e.total) : null, null,
+      dm ? S(dm.label) : null, ds ? N(ds.vcpu) : null, ds ? N(ds.vms) : null, ds ? N(ds.apps) : null,
+    ]);
+  }
+  const chartData = sheet('Chart data', cdHeader, cdRows, [12, 13, 13, 13, 13, 3, 12, 13, 13, 3, 11, ...leaving.map(() => 16), 16, 3, 30, 9, 9, 8]);
+
+  const C = (v: unknown, extra: Partial<NonNullable<Cell>> = {}): Cell => (v === null || v === undefined ? null : { ...(typeof v === 'number' ? { value: v, type: Number, format: '#,##0' } : { value: String(v), type: String }), ...extra });
+  const B = (v: string): Cell => ({ value: v, type: String, fontWeight: 'bold' });
+  const TH = (v: string): Cell => ({ value: v, type: String, fontWeight: 'bold', backgroundColor: '#E4EFFC' });
+  const ex: Row[] = [];
+  ex.push([{ value: `${APP_NAME} – Executive Summary`, type: String, fontWeight: 'bold', fontSize: 16 } as Cell]);
+  ex.push([C(`Generated ${new Date().toLocaleString('en-AU')} · Inventory: ${inventory ? `${inventory.sourceFile} (upload #${inventory.uploadId})` : 'none'} · Basis: ${scopeNote} · FY starts 1 July`, { color: '#52514E' })]);
+  ex.push([]);
+  ex.push([TH('Key figures'), TH('Value')]);
+  ex.push([C('VMs on-prem today'), N(base.vms)]);
+  ex.push([C('vCPU on-prem today'), N(base.vcpu)]);
+  ex.push([C(`VMs projected at end of ${fyLabel(settings.horizonFY)}`), N(endT.vms)]);
+  ex.push([C(`vCPU projected at end of ${fyLabel(settings.horizonFY)}`), N(endT.vcpu)]);
+  ex.push([C('vCPU reduction by horizon'), { value: base.vcpu ? (base.vcpu - endT.vcpu) / base.vcpu : 0, type: Number, format: '0%' }]);
+  ex.push([C('Applications with a treatment decision'), C(`${decided.length} of ${apps.length}`)]);
+  ex.push([C('Share of vCPU with a decision'), { value: base.vcpu ? decidedVcpu / base.vcpu : 0, type: Number, format: '0%' }]);
+  ex.push([]);
+  ex.push([TH('Deadline'), TH('Date'), TH('Status'), TH('VMs then'), TH('vCPU then')]);
+  for (const d of [...settings.deadlines].sort((a, b) => a.date.localeCompare(b.date))) {
+    const at = parseISODate(d.date);
+    const vendor = d.kind === 'Cisco' || d.kind === 'Lenovo' ? d.kind : null;
+    const fp = footprintAt(vms, plans, at, vendor ? (v) => vendorOf(settings, v.location) === vendor : undefined);
+    ex.push([C(`${d.label}${vendor ? ` (on ${vendor} clusters)` : ''}`), D(at), C(`${fyLabel(fyOf(at))} · ${d.confirmed ? 'confirmed' : 'date to confirm'}`), N(fp.vms), N(fp.vcpu)]);
+  }
+  ex.push([]);
+  ex.push([TH('Treatment'), TH('Apps'), TH('VMs'), TH('vCPU'), TH('% of vCPU')]);
+  for (const dm of DISPOSITIONS) {
+    const x = disp.find((y) => y.id === dm.id)!;
+    ex.push([C(dm.label), N(x.apps), N(x.vms), N(x.vcpu), { value: base.vcpu ? x.vcpu / base.vcpu : 0, type: Number, format: '0%' }]);
+  }
+  ex.push([]);
+  ex.push([TH('Domain'), TH('Apps'), TH('VMs'), TH('vCPU'), TH(`vCPU end ${fyLabel(settings.horizonFY)}`)]);
+  const domains = new Map<string, { apps: Set<string>; vms: number; vcpu: number }>();
+  for (const v of vms) {
+    const dn = parseApp(v.appKey).domain;
+    const r = domains.get(dn) ?? { apps: new Set<string>(), vms: 0, vcpu: 0 };
+    r.apps.add(v.appKey); r.vms++; r.vcpu += v.vcpu;
+    domains.set(dn, r);
+  }
+  for (const [dn, r] of [...domains.entries()].sort((a, b) => b[1].vcpu - a[1].vcpu)) {
+    ex.push([C(dn), N(r.apps.size), N(r.vms), N(r.vcpu), N(footprintAt(vms, plans, fyQuarterEnd(settings.horizonFY, 4), (v) => parseApp(v.appKey).domain === dn).vcpu)]);
+  }
+  if (inventory?.clusters.length) {
+    ex.push([]);
+    ex.push([TH('Hardware vendor'), TH('Clusters'), TH('ESXi hosts'), TH('Physical cores'), TH('Running vCPU')]);
+    const hw = new Map<string, { c: number; h: number; k: number; v: number }>();
+    for (const c of inventory.clusters) {
+      const vn = vendorOf(settings, c.name) === 'Cisco' ? 'Cisco HyperFlex' : vendorOf(settings, c.name);
+      const r = hw.get(vn) ?? { c: 0, h: 0, k: 0, v: 0 };
+      r.c++; r.h += c.hosts; r.k += c.cores; r.v += c.runningVcpu;
+      hw.set(vn, r);
+    }
+    for (const [vn, r] of hw) ex.push([C(vn), N(r.c), N(r.h), N(r.k), N(r.v)]);
+  }
+  void B;
+  const execSheet = { sheet: 'Executive Summary', data: ex, columns: [{ width: 46 }, { width: 13 }, { width: 22 }, { width: 14 }, { width: 14 }, { width: 3 }, ...Array.from({ length: 18 }, () => ({ width: 10.5 }))] };
+
+  const qCats = tq.map((p) => p.label);
+  const fCats = tf.map((p) => (p.label === 'Now' ? 'Now' : `End ${p.label}`));
+  const W = 9, Hrows = 20, col0 = 6;
+  const pos = (i: number) => ({ col: col0 + (i % 2) * (W + 0), row: 3 + Math.floor(i / 2) * (Hrows + 1), cols: W, rows: Hrows });
+  const COL = { vm: '2A78D6', vcpu: 'EB6834' };
+  const SLOT: Record<string, string> = { retire: '2A78D6', saas: 'EB6834', modernize_aws: '1BAF7A', modernize_azure: 'EDA100', rehost_aws: 'E87BA4', retain_sovereignty: '008300', retain_latency: '6250D6', tbd: 'B9B8B0' };
+  const charts: ChartDef[] = [
+    { type: 'line', title: 'On-prem footprint by quarter (% of today)', catRef: rng('A', tq.length), categories: qCats, numFmt: '0"%"', yMax: 100,
+      series: [
+        { name: 'VMs', valRef: rng('D', tq.length), values: tq.map((p) => p.vmsPct), color: COL.vm },
+        { name: 'vCPU', valRef: rng('E', tq.length), values: tq.map((p) => p.vcpuPct), color: COL.vcpu },
+      ], at: pos(0) },
+    { type: 'column', stacked: true, title: 'vCPU leaving on-prem per quarter, by treatment', catRef: rng('K', exitsV.length), categories: exitsV.map((e) => e.label),
+      series: leaving.map((d, i) => ({ name: d.short, valRef: rng(leaveCols[i], exitsV.length), values: exitsV.map((e) => e[d.id] ?? 0), color: SLOT[d.id] })), at: pos(1) },
+    { type: 'line', title: 'vCPU remaining on-prem by quarter', catRef: rng('A', tq.length), categories: qCats,
+      series: [{ name: 'vCPU', valRef: rng('C', tq.length), values: tq.map((p) => p.vcpu), color: COL.vcpu }], at: pos(2) },
+    { type: 'line', title: 'VMs remaining on-prem by quarter', catRef: rng('A', tq.length), categories: qCats,
+      series: [{ name: 'VMs', valRef: rng('B', tq.length), values: tq.map((p) => p.vms), color: COL.vm }], at: pos(3) },
+    { type: 'column', title: 'vCPU remaining at the end of each FY', catRef: rng('G', tf.length), categories: fCats,
+      series: [{ name: 'vCPU', valRef: rng('I', tf.length), values: tf.map((p) => p.vcpu), color: COL.vcpu }], at: pos(4) },
+    { type: 'bar', title: "Today's vCPU by treatment", catRef: rng('S', DISPOSITIONS.length), categories: DISPOSITIONS.map((d) => d.label),
+      series: [{ name: 'vCPU', valRef: rng('T', DISPOSITIONS.length), values: DISPOSITIONS.map((d) => disp.find((x) => x.id === d.id)!.vcpu), color: '2A78D6' }], at: pos(5) },
+  ];
+
+  const sheets = [execSheet, treatment, roadmap, byQuarter, vmSheet, changeLog, uploadSheet, chartData];
   if (orphans.length) {
     sheets.push(sheet('Unmatched decisions', ['Application_Primary (not in latest inventory)', 'Treatment', 'Target period', 'Notes', 'Last updated by'],
       orphans.map(([k, p]) => [S(k), S(DISP[p.disposition].label), S(p.targetFY ? quarterLabel(p.targetFY, p.targetQ ?? 4) : ''), S(p.notes), S(p.updatedBy)]),
       [52, 28, 12, 40, 20]));
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (await writeExcelFile(sheets as any).toBuffer()) as Buffer;
+  const raw = (await writeExcelFile(sheets as any).toBuffer()) as Buffer;
+  return Buffer.from(addCharts(new Uint8Array(raw), 'Executive Summary', charts));
 }

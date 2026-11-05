@@ -287,6 +287,13 @@ if (STATIC_DIR) {
   app.get('/', (_req, res) => res.type('text').send('Web app not built. Run "npm run build" first (API is available under /api).'));
 }
 
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK'] as const) {
+  process.on(sig, () => {
+    store.close();
+    process.exit(0);
+  });
+}
+
 app.listen(PORT, HOST, () => {
   console.log('');
   console.log(`  OnPrem Transformation Planner is running`);

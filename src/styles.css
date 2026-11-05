@@ -255,3 +255,18 @@ table.t { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 
 .hist-row:first-child { border-top: 0; }
 .arrow { color: var(--text-3); margin: 0 6px; }
 code { font-size: 12px; background: var(--surface-2); padding: 1px 4px; border-radius: 4px; }
+
+/* ---------- print (Executive Summary → Save as PDF) ---------- */
+/* The Print button adds html.printing first so charts re-measure at A4-landscape width. */
+html.printing .page { width: 1040px; max-width: 1040px; padding: 0; margin: 0; }
+html.printing .grid.g-main, html.printing .grid.g-2 { grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); }
+html.printing .g-kpi { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media print {
+  :root { color-scheme: light; }
+  body { background: #fff; }
+  .topbar, .no-print, .toasts, .banner, details, .btn, .seg { display: none !important; }
+  .card { box-shadow: none; break-inside: avoid; }
+  .grid { break-inside: auto; }
+  .table-wrap { max-height: none !important; overflow: visible; }
+  @page { size: A4 landscape; margin: 10mm; }
+}

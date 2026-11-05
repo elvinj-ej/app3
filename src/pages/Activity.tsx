@@ -24,7 +24,7 @@ export default function Activity() {
           <h1>Activity</h1>
           <p>Every change to an application's treatment: who made it, when, and what it was before.</p>
         </div>
-        <a className="btn" href="api/export/treatment-plan.xlsx">Export treatment plan (Excel)</a>
+        <a className="btn" href="api/export/treatment-plan.xlsx">Export to Excel (with charts)</a>
       </div>
       <div className="card card-pad">
         <div className="filters" style={{ marginBottom: 12 }}>

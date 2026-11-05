@@ -12,7 +12,9 @@ export class Store {
     mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
     this.db.exec(`
-      PRAGMA journal_mode = WAL;
+      PRAGMA journal_mode = DELETE; -- single self-contained file: safe to copy for backup at any time
+      PRAGMA synchronous = FULL;
+      PRAGMA busy_timeout = 5000;
       PRAGMA foreign_keys = ON;
       CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS uploads (
@@ -52,6 +54,14 @@ export class Store {
       );
       CREATE INDEX IF NOT EXISTS plan_history_app ON plan_history(app_key, id);
     `);
+  }
+
+  close() {
+    try {
+      this.db.close();
+    } catch {
+      /* already closed */
+    }
   }
 
   tx<T>(fn: () => T): T {

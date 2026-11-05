@@ -180,7 +180,7 @@ export default function Planner() {
             <button aria-pressed={view === 'apps'} onClick={() => setView('apps')}>By application</button>
             <button aria-pressed={view === 'vms'} onClick={() => setView('vms')}>By VM</button>
           </div>
-          <a className="btn btn-primary" href="api/export/treatment-plan.xlsx">Export treatment plan (Excel)</a>
+          <a className="btn btn-primary" href="api/export/treatment-plan.xlsx">Export to Excel (with charts)</a>
           <button className="btn" onClick={exportView}>Export view (CSV)</button>
         </div>
       </div>
