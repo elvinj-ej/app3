@@ -1,7 +1,7 @@
 import writeExcelFile from 'write-excel-file/node';
 import { DISPOSITIONS, dispMeta } from '../src/lib/dispositions.ts';
 import { fyLabel, fyOf, fyQuarterEnd, parseISODate, quarterLabel, quarterRange } from '../src/lib/fy.ts';
-import { byDisposition, exitDate, exitsBy, footprintScenarios, groupApps, periods, planFor, scopeVMs, totals, trend, whatStays } from '../src/lib/projection.ts';
+import { byDisposition, exitDate, vmExitDate, heldBySovereignty, exitsBy, footprintScenarios, groupApps, periods, planFor, scopeVMs, totals, trend, whatStays } from '../src/lib/projection.ts';
 import { CONFIDENCE, CONFIDENCE_LABEL, VENDOR_LABEL, deadlineVendor, moveWeight, vendorOf } from '../src/lib/defaults.ts';
 import { addCharts, type ChartDef } from './charts.ts';
 import { APP_NAME } from '../src/lib/brand.ts';
@@ -44,7 +44,9 @@ export async function buildTreatmentWorkbook(input: {
   const isRisk = input.basis !== 'plan';
   const bName = isRisk ? 'Risk-adjusted' : 'Full plan';
   const altName = isRisk ? 'Full plan' : 'Risk-adjusted';
-  const allVms = inventory?.vms ?? [];
+  const sov = settings.sovereignClusters ?? {};
+  // All VMs (incl. powered-off), flagged when on a data-sovereignty cluster.
+  const allVms = (inventory?.vms ?? []).map((v) => (sov[v.location] !== undefined ? { ...v, pinned: true } : v));
   const vms = scopeVMs(allVms, settings);
   const apps = groupApps(allVms);
   const scopeNote = settings.includePoweredOff ? 'all VMs' : 'powered-on VMs only';
@@ -57,7 +59,7 @@ export async function buildTreatmentWorkbook(input: {
   const treatment = sheet(
     'Treatment plan',
     ['Application_Primary', 'Application', 'Domain', 'Tier', 'Service', 'Owner', 'VMs', 'Powered-on VMs', 'vCPU', 'vRAM (GB)', 'Storage (GB)',
-      'Environments', 'vCenters', 'Treatment', 'Treatment group', 'Target FY', 'Target quarter', 'Target period', 'Off on-prem by', 'Confidence', 'Counted as moved (risk-adj.)', 'Review by', 'Notes', 'Last updated by', 'Last updated'],
+      'Environments', 'vCenters', 'Treatment', 'Treatment group', 'Target FY', 'Target quarter', 'Target period', 'Off on-prem by', 'Confidence', 'Counted as moved (risk-adj.)', 'Review by', 'VMs pinned (data sovereignty)', 'Notes', 'Last updated by', 'Last updated'],
     appRows.map(({ a, p, exit }) => {
       const m = dispMeta(p.disposition);
       const scheduled = m.leavesOnPrem && p.targetFY;
@@ -72,10 +74,11 @@ export async function buildTreatmentWorkbook(input: {
         S(scheduled ? (p.confidence ? CONFIDENCE_LABEL[p.confidence] : 'Not rated') : ''),
         scheduled ? { value: moveWeight(p.confidence, W8), type: Number, format: '0%' } : null,
         S(p.reviewFY ? `${quarterLabel(p.reviewFY, p.reviewQ ?? 4)} (${quarterRange(p.reviewFY, p.reviewQ ?? 4)})` : ''),
+        N(a.vms.filter((v) => v.pinned).length || null),
         S(p.notes), S(p.updatedBy), DT(p.updatedAt),
       ];
     }),
-    [48, 28, 10, 9, 28, 22, 7, 9, 7, 9, 10, 18, 12, 28, 14, 12, 9, 26, 13, 11, 12, 24, 40, 18, 17],
+    [48, 28, 10, 9, 28, 22, 7, 9, 7, 9, 10, 18, 12, 28, 14, 12, 9, 26, 13, 11, 12, 24, 14, 40, 18, 17],
   );
 
   // 2. Quarterly roadmap
@@ -112,20 +115,21 @@ export async function buildTreatmentWorkbook(input: {
   // 4. VMs with their application's treatment
   const vmSheet = sheet(
     'VMs',
-    ['VMName', 'PowerState', 'Application_Primary', 'Original Application_Primary (if remapped)', 'Domain', 'Tier', 'Environment', 'vCenter', 'VMLocation', 'GuestOS', 'vCPU', 'Memory (GB)', 'Storage (GB)', 'Treatment', 'Target period', 'Off on-prem by'],
+    ['VMName', 'PowerState', 'Application_Primary', 'Original Application_Primary (if remapped)', 'Domain', 'Tier', 'Environment', 'vCenter', 'VMLocation', 'GuestOS', 'vCPU', 'Memory (GB)', 'Storage (GB)', 'Treatment', 'Target period', 'Off on-prem by', 'Data sovereignty'],
     [...allVms]
       .sort((x, y) => x.appKey.localeCompare(y.appKey) || x.name.localeCompare(y.name))
       .map((v) => {
         const a = parseApp(v.appKey);
         const p = planFor(plans, v.appKey);
-        const ex = exitDate(p);
+        const ex = vmExitDate(p, v);
         return [
           S(v.name), S(v.poweredOn ? 'PoweredOn' : 'PoweredOff'), S(v.appKey), S(v.origAppKey ?? ''), S(a.domain), S(a.tier), S(v.environment), S(v.vcenter),
           S(v.location), S(v.os), N(v.vcpu), N(v.memGB), N(Math.round(v.storageProvGB)), S(dispMeta(p.disposition).label),
           S(ex ? quarterLabel(p.targetFY!, p.targetQ ?? 4) : ''), D(ex),
+          S(v.pinned ? (heldBySovereignty(v, p) ? `Pinned on-prem – ${sov[v.location] || 'data sovereignty'}` : `On sovereignty cluster – ${sov[v.location] || 'data sovereignty'}`) : ''),
         ];
       }),
-    [28, 11, 48, 40, 10, 9, 11, 26, 18, 32, 6, 10, 10, 26, 12, 13],
+    [28, 11, 48, 40, 10, 9, 11, 26, 18, 32, 6, 10, 10, 26, 12, 13, 36],
   );
 
   // 5. Decisions that no longer match an application in the latest inventory
@@ -221,7 +225,7 @@ export async function buildTreatmentWorkbook(input: {
   ex.push([]);
   ex.push([TH(`What stays on-prem at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()})`), TH('Apps'), TH('VMs'), TH('vCPU'), TH('% of remaining')]);
   {
-    const ws = whatStays(vms, plans, settings, isRisk ? 'risk' : 'plan').filter((r) => isRisk || r.id !== 'risk');
+    const ws = whatStays(vms, plans, settings, isRisk ? 'risk' : 'plan').filter((r) => (isRisk || r.id !== 'risk') && (r.id !== 'pinned' || Object.keys(sov).length > 0));
     const tot = ws.reduce((a, r) => a + r.vcpu, 0);
     for (const r of ws) ex.push([C(r.label), N(r.apps), N(Math.round(r.vms)), N(Math.round(r.vcpu)), { value: tot ? r.vcpu / tot : 0, type: Number, format: '0%' }]);
     ex.push([B('Total remaining'), null, N(Math.round(ws.reduce((a, r) => a + r.vms, 0))), N(Math.round(tot)), null]);
@@ -232,7 +236,7 @@ export async function buildTreatmentWorkbook(input: {
     const acc: Record<string, { apps: Set<string>; vms: number; vcpu: number }> = {};
     for (const v of vms) {
       const p = planFor(plans, v.appKey);
-      if (!exitDate(p)) continue;
+      if (!vmExitDate(p, v)) continue;
       const k = p.confidence ?? 'unrated';
       const r = (acc[k] ??= { apps: new Set(), vms: 0, vcpu: 0 });
       r.apps.add(v.appKey); r.vms++; r.vcpu += v.vcpu;
@@ -262,6 +266,14 @@ export async function buildTreatmentWorkbook(input: {
   }
   if (inventory?.clusters.length) {
     ex.push([]);
+    if (Object.keys(sov).length) {
+      ex.push([TH('Data-sovereignty clusters (VMs pinned on-prem)'), TH('Reason'), TH(''), TH('VMs'), TH('vCPU')]);
+      for (const c of Object.keys(sov).sort()) {
+        const on = vms.filter((v) => v.location === c);
+        ex.push([C(c), C(sov[c] || '—'), null, N(on.length), N(on.reduce((x, v) => x + v.vcpu, 0))]);
+      }
+      ex.push([]);
+    }
     ex.push([TH('Hardware vendor'), TH('Clusters'), TH('ESXi hosts'), TH('Physical cores'), TH('Running vCPU')]);
     const hw = new Map<string, { c: number; h: number; k: number; v: number }>();
     for (const c of inventory.clusters) {

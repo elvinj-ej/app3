@@ -124,14 +124,14 @@ export default function SettingsPage() {
 
       <div className="card card-pad">
         <div className="card-head">
-          <div><h2>Cluster hardware vendor</h2><p className="sub">Defaults: Equinix-Linux, Equinix-Windows, MacPark-CCTV, MacPark-Linux and MacPark-Windows are Cisco FlashStack; clusters named “-HX-” are Cisco HyperFlex; the rest Lenovo. Change any cluster here – used for the HW deadlines and hardware estate.</p></div>
+          <div><h2>Clusters: hardware vendor &amp; data sovereignty</h2><p className="sub"><b>Data sovereignty:</b> switch a cluster on to pin all its VMs on-prem – they are greyed out in the Application Planner and never counted as moving to SaaS or the cloud (Retire still applies). Planning stays per application. Changes are logged in Activity. <b>Vendor defaults:</b> Equinix-Linux, Equinix-Windows, MacPark-CCTV, MacPark-Linux and MacPark-Windows are Cisco FlashStack; clusters named “-HX-” are Cisco HyperFlex; the rest Lenovo. Change any cluster here – used for the HW deadlines and hardware estate.</p></div>
         </div>
         {inventory.clusters.length === 0 ? (
           <div className="note">No Clusters sheet in the current inventory.</div>
         ) : (
           <div className="table-wrap">
             <table className="t">
-              <thead><tr><th>Cluster</th><th>Class</th><th>vCenter</th><th className="r">Hosts</th><th className="r">Cores</th><th className="r">Running VMs</th><th className="r">Running vCPU</th><th>Vendor</th></tr></thead>
+              <thead><tr><th>Cluster</th><th>Class</th><th>vCenter</th><th className="r">Hosts</th><th className="r">Cores</th><th className="r">Running VMs</th><th className="r">Running vCPU</th><th>Vendor</th><th>Data sovereignty</th></tr></thead>
               <tbody>
                 {inventory.clusters.map((c) => (
                   <tr key={c.name}>
@@ -153,6 +153,7 @@ export default function SettingsPage() {
                         <option value="Other">Other</option>
                       </select>
                     </td>
+                    <td><SovereigntyCell cluster={c.name} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -202,6 +203,40 @@ function WeightsCard() {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+function SovereigntyCell({ cluster }: { cluster: string }) {
+  const { settings, updateSettings } = useStore();
+  const sov = settings.sovereignClusters ?? {};
+  const on = cluster in sov;
+  const [reason, setReason] = useState(sov[cluster] ?? '');
+  const [prev, setPrev] = useState(sov[cluster] ?? '');
+  if ((sov[cluster] ?? '') !== prev) {
+    setPrev(sov[cluster] ?? '');
+    setReason(sov[cluster] ?? '');
+  }
+  const save = (next: Record<string, string>) => updateSettings({ sovereignClusters: next });
+  return (
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center', minWidth: 260 }}>
+      <label className="check" title="Pin every VM on this cluster on-prem for data sovereignty">
+        <input type="checkbox" checked={on} aria-label={`Data sovereignty for ${cluster}`}
+          onChange={(e) => {
+            const next = { ...sov };
+            if (e.target.checked) next[cluster] = reason;
+            else delete next[cluster];
+            save(next);
+          }} />
+        {on ? '🔒 Pinned' : 'Off'}
+      </label>
+      {on && (
+        <input className="input select-sm" style={{ flex: 1 }} placeholder="Reason, e.g. China data residency" value={reason} maxLength={300}
+          aria-label={`Sovereignty reason for ${cluster}`}
+          onChange={(e) => setReason(e.target.value)}
+          onBlur={() => reason !== (sov[cluster] ?? '') && save({ ...sov, [cluster]: reason })}
+          onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} />
+      )}
     </div>
   );
 }

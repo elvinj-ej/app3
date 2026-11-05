@@ -235,6 +235,11 @@ export class Store {
     }));
   }
 
+  /** Record a non-decision event (e.g. a settings change) in the Activity log. */
+  logEvent(subject: string, text: string, user: string) {
+    this.addHistory(subject, 'setting', null, { notes: text }, user, new Date().toISOString());
+  }
+
   /** Remove a decision (kept in the change history). */
   deletePlan(key: string, user: string) {
     const before = this.getPlan(key);

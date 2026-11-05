@@ -65,6 +65,15 @@ Decisions belong to the application, not to a particular upload. They're keyed o
 text, so every new VMInfo upload picks them up automatically. An application counts as off on-prem at the end of its
 target quarter.
 
+### Data-sovereignty clusters
+
+In Settings, each cluster has a **Data sovereignty** switch, with an optional reason. Every VM on a switched-on cluster is
+**pinned on-prem**: it never counts as moving to SaaS, Modernise or Lift & Shift, though Retire still applies. Planning stays
+per application. In the Application Planner, pinned VMs are greyed out with a flag pointing to the setting. Application rows
+show "n of m VMs pinned" and how much vCPU can still move, and fully pinned applications offer one click to set Stay
+On-Prem – Data Sovereignty. A Cluster filter helps review what runs where. Pinned VMs appear in "What stays on-prem"
+and in the Excel export, and switching a cluster on or off is logged in Activity.
+
 ### Application mapping rules
 
 On the Inventory Updates page you can correct the VMInfo data without editing the spreadsheet. A **merge** rule counts one

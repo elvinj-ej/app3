@@ -19,8 +19,25 @@ export function exitDate(plan: AppPlan): Date | null {
   return fyQuarterEnd(plan.targetFY, plan.targetQ ?? 4);
 }
 
+/** Treatments that take a workload off-prem (blocked for VMs pinned by data sovereignty). Retire is not blocked. */
+export const MIGRATING = new Set<Disposition>(['saas', 'modernize_aws', 'modernize_azure', 'rehost_aws']);
+
+/** VMs in scope for the footprint, flagged `pinned` when their cluster is marked for data sovereignty. */
 export function scopeVMs(vms: VM[], settings: Settings): VM[] {
-  return settings.includePoweredOff ? vms : vms.filter((v) => v.poweredOn);
+  const inScope = settings.includePoweredOff ? vms : vms.filter((v) => v.poweredOn);
+  const sov = settings.sovereignClusters ?? {};
+  if (!Object.keys(sov).length) return inScope;
+  return inScope.map((v) => (sov[v.location] !== undefined ? { ...v, pinned: true } : v));
+}
+
+/** Is this VM held on-prem by a data-sovereignty cluster flag despite its application's treatment? */
+export function heldBySovereignty(v: VM, p: AppPlan): boolean {
+  return !!v.pinned && MIGRATING.has(p.disposition);
+}
+
+/** Exit date for one VM: the application's, unless the VM is pinned on-prem. */
+export function vmExitDate(p: AppPlan, v: VM): Date | null {
+  return heldBySovereignty(v, p) ? null : exitDate(p);
 }
 
 export interface Totals {
@@ -42,7 +59,7 @@ export function totals(vms: VM[]): Totals {
 export function footprintAt(vms: VM[], plans: PlanMap, at: Date, filter?: (v: VM) => boolean): Totals {
   const remaining = vms.filter((v) => {
     if (filter && !filter(v)) return false;
-    const d = exitDate(planFor(plans, v.appKey));
+    const d = vmExitDate(planFor(plans, v.appKey), v);
     return !d || d > at;
   });
   return totals(remaining);
@@ -64,7 +81,7 @@ export function footprintScenarios(vms: VM[], plans: PlanMap, at: Date, weights:
   for (const v of vms) {
     if (filter && !filter(v)) continue;
     const p = planFor(plans, v.appKey);
-    const d = exitDate(p);
+    const d = vmExitDate(p, v);
     const gone = !!d && d <= at;
     const add = (t: Totals, f: number) => {
       t.vms += f;
@@ -156,7 +173,7 @@ export function exitsBy(vms: VM[], plans: PlanMap, settings: Settings, metric: '
   const rows: ExitRow[] = ps.map((p) => ({ label: p.label, total: 0, apps: 0 }));
   const appSeen = ps.map(() => new Set<string>());
   for (const v of vms) {
-    const d = exitDate(planFor(plans, v.appKey));
+    const d = vmExitDate(planFor(plans, v.appKey), v);
     if (!d) continue;
     let idx = periodIndexFor(ps, d);
     if (idx < 0) continue;
@@ -227,7 +244,8 @@ export function groupApps(vms: VM[]): AppRow[] {
 }
 
 export interface StayBucket {
-  id: 'retain_sovereignty' | 'retain_latency' | 'retain_maintain' | 'tbd' | 'unscheduled' | 'risk';
+  id: 'retain_sovereignty' | 'pinned' | 'retain_latency' | 'retain_maintain' | 'tbd' | 'unscheduled' | 'risk';
+  muted?: boolean;
   label: string;
   color: string;
   vms: number;
@@ -243,6 +261,7 @@ export function whatStays(vms: VM[], plans: PlanMap, settings: Settings, basis: 
   const w = settings.confidenceWeights ?? DEFAULT_WEIGHTS;
   const defs: Omit<StayBucket, 'vms' | 'vcpu' | 'apps'>[] = [
     { id: 'retain_sovereignty', label: 'Stay – Data Sovereignty', color: 'var(--s6)' },
+    { id: 'pinned', label: 'Stay – Data Sovereignty (pinned by cluster)', color: 'var(--s6)', muted: true },
     { id: 'retain_latency', label: 'Stay – Latency', color: 'var(--s7)' },
     { id: 'retain_maintain', label: 'Stay – Maintain', color: 'var(--s8)' },
     { id: 'tbd', label: 'Undecided', color: 'var(--s-tbd)' },
@@ -260,6 +279,11 @@ export function whatStays(vms: VM[], plans: PlanMap, settings: Settings, basis: 
   for (const v of vms) {
     const p = planFor(plans, v.appKey);
     const m = dispMeta(p.disposition);
+    // On a data-sovereignty cluster and not already explained by a Stay decision (Retire still leaves).
+    if (v.pinned && m.group !== 'Retain' && p.disposition !== 'retire') {
+      add('pinned', v, 1);
+      continue;
+    }
     if (!m.leavesOnPrem) {
       add(p.disposition === 'tbd' ? 'tbd' : (p.disposition as StayBucket['id']), v, 1);
       continue;

@@ -288,3 +288,10 @@ html.printing .g-kpi { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .table-wrap { max-height: none !important; overflow: visible; }
   @page { size: A4 landscape; margin: 10mm; }
 }
+
+/* ---------- data-sovereignty pinning ---------- */
+.t tr.pinned td { color: var(--text-3); background: repeating-linear-gradient(135deg, transparent 0 6px, var(--surface-2) 6px 12px); }
+.t tr.pinned td .chip, .t tr.pinned td .app-name { color: var(--text-3); }
+.pin-flag { font-size: 11px; color: var(--text-2); margin-top: 2px; }
+.pin-flag a { color: var(--accent-ink); }
+.pin-badge { font-size: 11px; color: var(--text-2); margin-top: 3px; display: flex; align-items: center; flex-wrap: wrap; gap: 2px; }

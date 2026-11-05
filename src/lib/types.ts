@@ -16,6 +16,8 @@ export interface VM {
   storageUsedGB: number;
   /** Set when a mapping rule moved this VM to a different application (the value from the VMInfo file). */
   origAppKey?: string;
+  /** Set by scopeVMs: the VM sits on a cluster flagged for data sovereignty. */
+  pinned?: boolean;
 }
 
 export interface Cluster {
@@ -67,7 +69,7 @@ export interface UploadMeta {
 export interface HistoryEntry {
   id: number;
   appKey: string;
-  action: 'update' | 'bulk' | 'rename' | 'import' | 'rule' | 'delete';
+  action: 'update' | 'bulk' | 'rename' | 'import' | 'rule' | 'delete' | 'setting';
   before: Partial<AppPlan> | null;
   after: Partial<AppPlan> | null;
   changedBy: string;
@@ -129,6 +131,8 @@ export interface Settings {
   deadlines: Deadline[];
   clusterVendor: Record<string, HwVendor>;
   confidenceWeights: ConfidenceWeights;
+  /** Clusters whose VMs must stay on-prem for data sovereignty → reason. */
+  sovereignClusters: Record<string, string>;
 }
 
 export interface AppInfo {

@@ -5,7 +5,7 @@ import {
 import { useStore, vendorOf } from '../lib/store';
 import { DISP, DISPOSITIONS, dispMeta } from '../lib/dispositions';
 import { daysUntil, fmtDate, fyEnd, fyLabel, fyOf, fyQuarterOf, humanCountdown, parseISODate, quarterLabel, quarterRange } from '../lib/fy';
-import { byDisposition, exitDate, exitsBy, footprintScenarios, groupApps, planFor, scopeVMs, totals, trend, whatStays, type Granularity, type Scenarios, type TrendPoint } from '../lib/projection';
+import { byDisposition, vmExitDate, exitsBy, footprintScenarios, groupApps, planFor, scopeVMs, totals, trend, whatStays, type Granularity, type Scenarios, type TrendPoint } from '../lib/projection';
 import { CONFIDENCE, VENDOR_LABEL, deadlineShort, deadlineVendor } from '../lib/defaults';
 import { parseApp } from '../lib/parse';
 import { fmt, useColors } from '../lib/useColors';
@@ -52,7 +52,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
     const unrated = new Set<string>();
     for (const v of vms) {
       const p = planFor(plans, v.appKey);
-      if (!exitDate(p)) continue;
+      if (!vmExitDate(p, v)) continue;
       total += v.vcpu;
       if (p.confidence) by[p.confidence] += v.vcpu;
       else unrated.add(v.appKey);
@@ -644,7 +644,7 @@ function toView(p: TrendPoint, basis: Basis): ViewPoint {
 function WhatStaysCard({ basis }: { basis: Basis }) {
   const { inventory, plans, settings } = useStore();
   const vms = scopeVMs(inventory.vms, settings);
-  const rows = useMemo(() => whatStays(vms, plans, settings, basis).filter((r) => basis === 'risk' || r.id !== 'risk'), [vms, plans, settings, basis]);
+  const rows = useMemo(() => whatStays(vms, plans, settings, basis).filter((r) => (basis === 'risk' || r.id !== 'risk') && (r.id !== 'pinned' || Object.keys(settings.sovereignClusters ?? {}).length > 0)), [vms, plans, settings, basis]);
   const total = rows.reduce((a, r) => a + r.vcpu, 0);
   const totalVms = rows.reduce((a, r) => a + r.vms, 0);
   const max = Math.max(...rows.map((r) => r.vcpu), 1);
@@ -657,13 +657,13 @@ function WhatStaysCard({ basis }: { basis: Basis }) {
         </div>
       </div>
       <div className="meter" style={{ height: 10, marginTop: 0, marginBottom: 14 }} title="Share of remaining vCPU">
-        {rows.map((r) => (r.vcpu > 0 ? <span key={r.id} style={{ width: `${(r.vcpu / (total || 1)) * 100}%`, background: r.color }} /> : null))}
+        {rows.map((r) => (r.vcpu > 0 ? <span key={r.id} style={{ width: `${(r.vcpu / (total || 1)) * 100}%`, background: r.color, opacity: r.muted ? 0.5 : 1 }} /> : null))}
       </div>
       <div className="bar-list">
         {rows.map((r) => (
           <div className="bar-row bar-row-wide" key={r.id} title={`${r.apps} apps · ${fmt(r.vms)} VMs`}>
-            <div className="lbl"><i className="dot" style={{ background: r.color }} /><span>{r.label}</span></div>
-            <div className="track"><div className="fill" style={{ width: `${(r.vcpu / max) * 100}%`, background: r.color }} /></div>
+            <div className="lbl"><i className="dot" style={{ background: r.color, opacity: r.muted ? 0.5 : 1 }} /><span>{r.label}</span></div>
+            <div className="track"><div className="fill" style={{ width: `${(r.vcpu / max) * 100}%`, background: r.color, opacity: r.muted ? 0.5 : 1 }} /></div>
             <div className="val num">{fmt(r.vcpu)} vCPU · {total ? Math.round((r.vcpu / total) * 100) : 0}% · {r.apps} apps</div>
           </div>
         ))}

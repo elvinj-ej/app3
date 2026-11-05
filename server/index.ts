@@ -291,6 +291,19 @@ api.put('/settings', wrap((req, res) => {
   if (patch.includePoweredOff !== undefined) next.includePoweredOff = !!patch.includePoweredOff;
   if (Array.isArray(patch.deadlines)) next.deadlines = patch.deadlines.slice(0, 50);
   if (patch.clusterVendor && typeof patch.clusterVendor === 'object') next.clusterVendor = patch.clusterVendor;
+  if (patch.sovereignClusters && typeof patch.sovereignClusters === 'object' && !Array.isArray(patch.sovereignClusters)) {
+    const nextSov: Record<string, string> = {};
+    for (const [k, v] of Object.entries(patch.sovereignClusters as Record<string, unknown>).slice(0, 300)) nextSov[String(k).slice(0, 200)] = String(v ?? '').slice(0, 300);
+    const before = cur.sovereignClusters ?? {};
+    const user = userOf(req);
+    for (const k of new Set([...Object.keys(before), ...Object.keys(nextSov)])) {
+      const was = k in before, now = k in nextSov;
+      if (was && !now) store.logEvent(`Cluster: ${k}`, `Data-sovereignty pin removed from cluster ${k}`, user);
+      else if (!was && now) store.logEvent(`Cluster: ${k}`, `Cluster ${k} pinned on-prem for data sovereignty${nextSov[k] ? ` – ${nextSov[k]}` : ''}`, user);
+      else if (was && now && before[k] !== nextSov[k]) store.logEvent(`Cluster: ${k}`, `Data-sovereignty reason for ${k} changed to “${nextSov[k]}”`, user);
+    }
+    next.sovereignClusters = nextSov;
+  }
   if (patch.confidenceWeights && typeof patch.confidenceWeights === 'object') {
     const w = { ...cur.confidenceWeights };
     for (const k of ['high', 'medium', 'low', 'unknown', 'unrated'] as const) {

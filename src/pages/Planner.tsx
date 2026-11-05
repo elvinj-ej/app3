@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useStore } from '../lib/store';
 import { DISPOSITIONS, dispMeta } from '../lib/dispositions';
 import { fyLabel, fyOf, fyQuarterOf, quarterLabel, quarterRange } from '../lib/fy';
-import { groupApps, planFor, scopeVMs, type AppRow } from '../lib/projection';
+import { groupApps, heldBySovereignty, planFor, scopeVMs, type AppRow } from '../lib/projection';
 import { parseApp, TIER_ORDER } from '../lib/parse';
 import { fmt } from '../lib/useColors';
 import type { AppPlan, Confidence, ConfidenceWeights, Disposition, Quarter, VM } from '../lib/types';
@@ -35,6 +35,7 @@ export default function Planner() {
   const [conf, setConf] = useState('');
   const [site, setSite] = useState('');
   const [env, setEnv] = useState('');
+  const [loc, setLoc] = useState('');
   const [sortApp, setSortApp] = useState<{ k: AppSortKey; d: SortDir }>({ k: 'vcpu', d: -1 });
   const [sortVm, setSortVm] = useState<{ k: VmSortKey; d: SortDir }>({ k: 'app', d: 1 });
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -46,6 +47,8 @@ export default function Planner() {
   const domains = useMemo(() => [...new Set(allApps.map((a) => a.domain))].sort(), [allApps]);
   const tiers = useMemo(() => [...new Set(allApps.map((a) => a.tier))].sort((a, b) => tierRank(a) - tierRank(b)), [allApps]);
   const sites = useMemo(() => [...new Set(vms.map((v) => v.site))].sort(), [vms]);
+  const locs = useMemo(() => [...new Set(vms.map((v) => v.location))].sort(), [vms]);
+  const sov = settings.sovereignClusters ?? {};
   const envs = useMemo(() => [...new Set(vms.map((v) => v.environment))].sort(), [vms]);
 
   const targetOptions = useMemo(() => {
@@ -66,7 +69,8 @@ export default function Planner() {
   const ql = q.trim().toLowerCase();
   const vmMatches = (v: VM) =>
     (!site || v.site === site) &&
-    (!env || v.environment === env);
+    (!env || v.environment === env) &&
+    (!loc || v.location === loc);
   const appMatches = (a: AppRow) =>
     (!domain || a.domain === domain) &&
     (!tier || a.tier === tier) &&
@@ -76,7 +80,7 @@ export default function Planner() {
   const apps = useMemo(() => {
     const out = allApps
       .filter(appMatches)
-      .filter((a) => (!site && !env) || a.vms.some(vmMatches))
+      .filter((a) => (!site && !env && !loc) || a.vms.some(vmMatches))
       .filter((a) => !ql || a.key.toLowerCase().includes(ql) || a.owner.toLowerCase().includes(ql) || a.vms.some((v) => v.name.toLowerCase().includes(ql)));
     const { k, d } = sortApp;
     const val = (a: AppRow): string | number => {
@@ -97,7 +101,7 @@ export default function Planner() {
       return (x < y ? -1 : x > y ? 1 : b.vcpu - a.vcpu) * d;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allApps, plans, domain, tier, disp, conf, site, env, ql, sortApp]);
+  }, [allApps, plans, domain, tier, disp, conf, site, env, loc, ql, sortApp]);
 
   const vmRows = useMemo(() => {
     if (view !== 'vms') return [];
@@ -132,7 +136,7 @@ export default function Planner() {
       return (x < y ? -1 : x > y ? 1 : a.name.localeCompare(b.name)) * d;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, vms, plans, domain, tier, disp, conf, site, env, ql, sortVm]);
+  }, [view, vms, plans, domain, tier, disp, conf, site, env, loc, ql, sortVm]);
 
   const shown = view === 'apps'
     ? { apps: apps.length, vms: apps.reduce((s, a) => s + a.vmCount, 0), vcpu: apps.reduce((s, a) => s + a.vcpu, 0) }
@@ -160,7 +164,7 @@ export default function Planner() {
   );
 
   const exportView = () => {
-    const rows = (view === 'apps' ? apps.flatMap((a) => a.vms.filter((v) => (!site && !env) || vmMatches(v))) : vmRows).map((v) => {
+    const rows = (view === 'apps' ? apps.flatMap((a) => a.vms.filter((v) => (!site && !env && !loc) || vmMatches(v))) : vmRows).map((v) => {
       const a = parseApp(v.appKey);
       const p = planFor(plans, v.appKey);
       return {
@@ -219,12 +223,16 @@ export default function Planner() {
               <option value="">All vCenters</option>
               {sites.map((d) => <option key={d}>{d}</option>)}
             </select>
+            <select className="select" value={loc} onChange={(e) => setLoc(e.target.value)} aria-label="Cluster">
+              <option value="">All clusters</option>
+              {locs.map((d) => <option key={d} value={d}>{d in sov ? `🔒 ${d}` : d}</option>)}
+            </select>
             <select className="select" value={env} onChange={(e) => setEnv(e.target.value)} aria-label="Environment">
               <option value="">All environments</option>
               {envs.map((d) => <option key={d}>{d}</option>)}
             </select>
-            {(q || domain || tier || disp || conf || site || env) && (
-              <button className="btn btn-sm" onClick={() => { setQ(''); setDomain(''); setTier(''); setDisp(''); setConf(''); setSite(''); setEnv(''); }}>Clear</button>
+            {(q || domain || tier || disp || conf || site || env || loc) && (
+              <button className="btn btn-sm" onClick={() => { setQ(''); setDomain(''); setTier(''); setDisp(''); setConf(''); setSite(''); setEnv(''); setLoc(''); }}>Clear</button>
             )}
             <span className="note" style={{ marginLeft: 'auto' }}>
               {shown.apps} apps · {fmt(shown.vms)} VMs · {fmt(shown.vcpu)} vCPU
@@ -261,7 +269,10 @@ export default function Planner() {
                   const p = planFor(plans, a.key);
                   const meta = dispMeta(p.disposition);
                   const open = expanded.has(a.key);
-                  const subVms = (!site && !env) ? a.vms : a.vms.filter(vmMatches);
+                  const subVms = (!site && !env && !loc) ? a.vms : a.vms.filter(vmMatches);
+                  const pinnedVms = a.vms.filter((v) => v.pinned);
+                  const heldVcpu = a.vms.filter((v) => heldBySovereignty(v, p)).reduce((x, v) => x + v.vcpu, 0);
+                  const fullyPinned = pinnedVms.length > 0 && pinnedVms.length === a.vms.length;
                   return (
                     <Fragment key={a.key}>
                       <tr className={selected.has(a.key) ? 'sel' : undefined}>
@@ -270,12 +281,20 @@ export default function Planner() {
                         <td style={{ minWidth: 200 }}>
                           <div className="app-name">{a.name}</div>
                           <div className="app-svc">{a.service}{a.owner ? ` · ${a.owner}` : ''}</div>
+                          {pinnedVms.length > 0 && (
+                            <div className="pin-badge" title={[...new Set(pinnedVms.map((v) => `${v.location}${sov[v.location] ? ` – ${sov[v.location]}` : ''}`))].join('\n')}>
+                              🔒 {fullyPinned ? 'All' : `${pinnedVms.length} of ${a.vmCount}`} VMs pinned – data sovereignty ({[...new Set(pinnedVms.map((v) => v.location))].join(', ')})
+                              {fullyPinned && p.disposition !== 'retain_sovereignty' && (
+                                <button className="btn btn-sm" style={{ marginLeft: 6, padding: '0 6px', fontSize: 11 }} onClick={() => setPlan(a.key, { disposition: 'retain_sovereignty' })}>Set to Stay – Sovereignty</button>
+                              )}
+                            </div>
+                          )}
                           {a.vms.some((v) => v.origAppKey) && <div className="muted" style={{ fontSize: 11 }} title={[...new Set(a.vms.filter((v) => v.origAppKey).map((v) => v.origAppKey))].join('\n')}>↪ includes {a.vms.filter((v) => v.origAppKey).length} VMs merged by mapping rules</div>}
                         </td>
                         <td>{a.domain}</td>
                         <td className="muted">{a.tier}</td>
                         <td className="r num">{a.vmCount}</td>
-                        <td className="r num"><b>{fmt(a.vcpu)}</b></td>
+                        <td className="r num"><b>{fmt(a.vcpu)}</b>{heldVcpu > 0 && <div className="muted" style={{ fontSize: 11, fontWeight: 400 }} title="vCPU that can actually leave on-prem">{fmt(a.vcpu - heldVcpu)} can move</div>}</td>
                         <td className="muted" style={{ fontSize: 12, maxWidth: 110 }} title={a.environments.join(', ')}>{a.environments.slice(0, 2).join(', ')}{a.environments.length > 2 ? ` +${a.environments.length - 2}` : ''}</td>
                         <td>
                           <div className="disp-cell">
@@ -302,9 +321,10 @@ export default function Planner() {
                         </td>
                       </tr>
                       {open && subVms.map((v) => (
-                        <tr className="sub" key={v.name}>
+                        <tr className={`sub${v.pinned && p.disposition !== 'retire' ? ' pinned' : ''}`} key={v.name}>
                           <td /><td />
-                          <td colSpan={2}>{v.name} <span className="muted">· {v.os || 'OS n/a'}</span>{v.origAppKey && <div className="muted" style={{ fontSize: 11 }}>↪ mapped from “{v.origAppKey}”</div>}</td>
+                          <td colSpan={2}>{v.name} <span className="muted">· {v.os || 'OS n/a'}</span>{v.origAppKey && <div className="muted" style={{ fontSize: 11 }}>↪ mapped from “{v.origAppKey}”</div>}
+                            {v.pinned && <PinFlag reason={sov[v.location]} cluster={v.location} retire={p.disposition === 'retire'} />}</td>
                           <td className="muted">{v.site}</td>
                           <td className="muted" colSpan={1}>{v.poweredOn ? 'On' : 'Off'}</td>
                           <td className="r num">{v.vcpu}</td>
@@ -342,8 +362,9 @@ export default function Planner() {
                   const p = planFor(plans, v.appKey);
                   const meta = dispMeta(p.disposition);
                   return (
-                    <tr key={v.name + v.vcenter}>
-                      <td>{v.name}{!v.poweredOn && <span className="chip" style={{ marginLeft: 6 }}>Off</span>}{v.origAppKey && <div className="muted" style={{ fontSize: 11 }} title={`VMInfo: ${v.origAppKey}`}>↪ mapped by rule</div>}</td>
+                    <tr key={v.name + v.vcenter} className={v.pinned && p.disposition !== 'retire' ? 'pinned' : undefined}>
+                      <td>{v.name}{!v.poweredOn && <span className="chip" style={{ marginLeft: 6 }}>Off</span>}{v.origAppKey && <div className="muted" style={{ fontSize: 11 }} title={`VMInfo: ${v.origAppKey}`}>↪ mapped by rule</div>}
+                        {v.pinned && <PinFlag reason={sov[v.location]} cluster={v.location} retire={p.disposition === 'retire'} />}</td>
                       <td><div className="app-name">{a.name}</div></td>
                       <td>{a.domain}</td>
                       <td className="muted">{a.tier}</td>
@@ -457,6 +478,15 @@ function ConfidencePicker({ plan, weights, onChange }: { plan: AppPlan; weights:
         <option value="">Not rated</option>
         {CONFIDENCE.map((x) => <option key={x.id} value={x.id}>{x.label} · {weights[x.id]}%</option>)}
       </select>
+    </div>
+  );
+}
+
+function PinFlag({ reason, cluster, retire }: { reason?: string; cluster: string; retire: boolean }) {
+  return (
+    <div className="pin-flag">
+      🔒 {retire ? 'On a data-sovereignty cluster – Retire still applies' : 'Pinned on-prem – data sovereignty'}
+      {reason ? ` (${reason})` : ''} · cluster {cluster} · <a href="#/settings">set in Settings</a>
     </div>
   );
 }
