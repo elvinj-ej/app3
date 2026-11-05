@@ -7,3 +7,4 @@ dist
 *.xls
 *.csv
 plan*.json
+*.tsbuildinfo
