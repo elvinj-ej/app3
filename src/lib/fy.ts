@@ -49,3 +49,14 @@ export function humanCountdown(days: number): string {
   if (months < 24) return `in ${months} months`;
   return `in ${(days / 365.25).toFixed(1)} years`;
 }
+
+export function quarterLabel(fy: number, q: number): string {
+  return `${fyLabel(fy)} Q${q}`;
+}
+
+const QMONTHS = ['Jul–Sep', 'Oct–Dec', 'Jan–Mar', 'Apr–Jun'];
+/** e.g. FY28 Q1 -> "Jul–Sep 2027" */
+export function quarterRange(fy: number, q: number): string {
+  const year = 2000 + fy - (q <= 2 ? 1 : 0);
+  return `${QMONTHS[q - 1]} ${year}`;
+}

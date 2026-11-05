@@ -4,8 +4,8 @@ import {
 } from 'recharts';
 import { useStore, vendorOf } from '../lib/store';
 import { DISP, DISPOSITIONS } from '../lib/dispositions';
-import { daysUntil, fmtDate, fyEnd, fyLabel, fyOf, humanCountdown, parseISODate } from '../lib/fy';
-import { byDisposition, exitsByFY, footprintAt, groupApps, planFor, scopeVMs, totals, trend } from '../lib/projection';
+import { daysUntil, fmtDate, fyEnd, fyLabel, fyOf, fyQuarterOf, humanCountdown, parseISODate, quarterLabel, quarterRange } from '../lib/fy';
+import { byDisposition, exitsBy, footprintAt, groupApps, planFor, scopeVMs, totals, trend, type Granularity } from '../lib/projection';
 import { parseApp } from '../lib/parse';
 import { fmt, useColors } from '../lib/useColors';
 import type { Deadline } from '../lib/types';
@@ -15,11 +15,12 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
   const color = useColors();
   const [mode, setMode] = useState<'indexed' | 'absolute'>('indexed');
   const [exitMetric, setExitMetric] = useState<'vcpu' | 'vms'>('vcpu');
+  const [gran, setGran] = useState<Granularity>('quarter');
 
   const vms = useMemo(() => scopeVMs(inventory.vms, settings), [inventory, settings]);
   const base = useMemo(() => totals(vms), [vms]);
-  const points = useMemo(() => trend(vms, plans, settings), [vms, plans, settings]);
-  const exits = useMemo(() => exitsByFY(vms, plans, settings, exitMetric), [vms, plans, settings, exitMetric]);
+  const points = useMemo(() => trend(vms, plans, settings, gran), [vms, plans, settings, gran]);
+  const exits = useMemo(() => exitsBy(vms, plans, settings, exitMetric, gran), [vms, plans, settings, exitMetric, gran]);
   const disp = useMemo(() => byDisposition(vms, plans), [vms, plans]);
   const apps = useMemo(() => groupApps(vms), [vms]);
   const endPt = points[points.length - 1];
@@ -31,17 +32,20 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
   const deadlines = [...settings.deadlines].sort((a, b) => a.date.localeCompare(b.date));
   const nextDl = deadlines.find((d) => daysUntil(d.date) >= 0);
 
-  // Group deadlines by the FY point they fall in (chart is categorical by FY).
+  // Group deadlines by the period (quarter or FY) they fall in – the chart axis is categorical.
   const refLines = useMemo(() => {
+    const labels = new Set(points.map((p) => p.label));
     const m = new Map<string, Deadline[]>();
     for (const d of deadlines) {
-      const fy = fyOf(parseISODate(d.date));
-      if (fy < settings.currentFY || fy > settings.horizonFY) continue;
-      const k = fyLabel(fy);
+      const dt = parseISODate(d.date);
+      const k = gran === 'quarter' ? quarterLabel(fyOf(dt), fyQuarterOf(dt)) : fyLabel(fyOf(dt));
+      if (!labels.has(k)) continue;
       m.set(k, [...(m.get(k) ?? []), d]);
     }
     return [...m.entries()];
-  }, [deadlines, settings]);
+  }, [deadlines, points, gran]);
+  const xTick = gran === 'quarter' ? { tick: <QuarterTick fill={color('--text-2')} />, interval: 0, height: 40 } : {};
+  const dotR = gran === 'quarter' ? 3 : 4;
 
   const refs = (fill: string, showLabel = true) =>
     refLines.map(([fy, ds]) => (
@@ -70,14 +74,21 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
             year: <b>{fyLabel(settings.currentFY)}</b>.
           </p>
         </div>
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={settings.includePoweredOff}
-            onChange={(e) => updateSettings({ includePoweredOff: e.target.checked })}
-          />
-          Include powered-off VMs ({inventory.vms.filter((v) => !v.poweredOn).length})
-        </label>
+        <div className="filters">
+          <div className="seg" role="group" aria-label="Timeline granularity">
+            <button aria-pressed={gran === 'quarter'} onClick={() => setGran('quarter')}>By quarter</button>
+            <button aria-pressed={gran === 'fy'} onClick={() => setGran('fy')}>By FY</button>
+          </div>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={settings.includePoweredOff}
+              onChange={(e) => updateSettings({ includePoweredOff: e.target.checked })}
+            />
+            Include powered-off VMs ({inventory.vms.filter((v) => !v.poweredOn).length})
+          </label>
+          <a className="btn" href="api/export/treatment-plan.xlsx">Export treatment plan (Excel)</a>
+        </div>
       </div>
 
       {/* KPIs */}
@@ -93,7 +104,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
           <div className="k-foot">Primary licensing driver</div>
         </div>
         <div className="card kpi">
-          <div className="k-label">Projected at end of {endPt.label}</div>
+          <div className="k-label">Projected at end of {fyLabel(settings.horizonFY)}</div>
           <div className="k-value num">
             {fmt(endPt.vcpu)}<small>vCPU</small>
           </div>
@@ -143,11 +154,11 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
         <div className="card card-pad">
           <div className="card-head">
             <div>
-              <h2>On-prem footprint by financial year</h2>
+              <h2>On-prem footprint by {gran === 'quarter' ? 'quarter' : 'financial year'}</h2>
               <p className="sub">
                 {mode === 'indexed'
-                  ? 'VMs and vCPU remaining at each FY end, indexed to today = 100%. Hover for absolute values.'
-                  : 'VMs and vCPU remaining at each FY end.'}
+                  ? `VMs and vCPU remaining at the end of each ${gran === 'quarter' ? 'FY quarter' : 'FY'}, indexed to today = 100%. Hover for absolute values.`
+                  : `VMs and vCPU remaining at the end of each ${gran === 'quarter' ? 'FY quarter' : 'FY'}.`}
               </p>
             </div>
             <div className="seg" role="group" aria-label="Chart scale">
@@ -158,21 +169,21 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
           <div className="legend" style={{ marginBottom: 8 }}>
             <span><i className="ln" style={{ background: 'var(--line-vm)' }} /> VMs</span>
             <span><i className="ln" style={{ background: 'var(--line-vcpu)' }} /> vCPU</span>
-            {refLines.length > 0 && <span><i className="dl" /> Deadline (FY it falls in)</span>}
+            {refLines.length > 0 && <span><i className="dl" /> Deadline ({gran === 'quarter' ? 'quarter' : 'FY'} it falls in)</span>}
           </div>
           {mode === 'indexed' ? (
             <ResponsiveContainer width="100%" height={330}>
               <LineChart data={points} margin={{ top: 28, right: 96, left: 0, bottom: 0 }}>
                 <CartesianGrid vertical={false} stroke={color('--grid')} />
-                <XAxis dataKey="label" {...axisProps} />
+                <XAxis dataKey="label" {...axisProps} {...xTick} />
                 <YAxis domain={[0, 100]} unit="%" {...axisProps} axisLine={false} width={48} />
                 <Tooltip content={<TrendTip />} cursor={{ stroke: color('--border-strong') }} />
                 {refs(color('--text-2'))}
                 <Line animationDuration={500} type="linear" dataKey="vmsPct" name="VMs" stroke={color('--line-vm')} strokeWidth={2}
-                  dot={{ r: 4, strokeWidth: 2, stroke: color('--surface'), fill: color('--line-vm') }} activeDot={{ r: 6, strokeWidth: 2, stroke: color('--surface') }}
+                  dot={{ r: dotR, strokeWidth: 2, stroke: color('--surface'), fill: color('--line-vm') }} activeDot={{ r: 6, strokeWidth: 2, stroke: color('--surface') }}
                   label={<EndLabel n={points.length} field="vms" text="VMs" color={color('--text-2')} points={points} dy={-8} />} />
                 <Line animationDuration={500} type="linear" dataKey="vcpuPct" name="vCPU" stroke={color('--line-vcpu')} strokeWidth={2}
-                  dot={{ r: 4, strokeWidth: 2, stroke: color('--surface'), fill: color('--line-vcpu') }} activeDot={{ r: 6, strokeWidth: 2, stroke: color('--surface') }}
+                  dot={{ r: dotR, strokeWidth: 2, stroke: color('--surface'), fill: color('--line-vcpu') }} activeDot={{ r: 6, strokeWidth: 2, stroke: color('--surface') }}
                   label={<EndLabel n={points.length} field="vcpu" text="vCPU" color={color('--text-2')} points={points} dy={14} />} />
               </LineChart>
             </ResponsiveContainer>
@@ -184,12 +195,12 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
                   <ResponsiveContainer width="100%" height={300}>
                     <LineChart data={points} margin={{ top: 18, right: 16, left: 0, bottom: 0 }}>
                       <CartesianGrid vertical={false} stroke={color('--grid')} />
-                      <XAxis dataKey="label" {...axisProps} />
+                      <XAxis dataKey="label" {...axisProps} {...xTick} />
                       <YAxis {...axisProps} axisLine={false} width={48} tickFormatter={(v) => fmt(v)} domain={[0, 'auto']} />
                       <Tooltip content={<TrendTip />} cursor={{ stroke: color('--border-strong') }} />
                       {refs(color('--text-2'), false)}
                       <Line animationDuration={500} type="linear" dataKey={f} stroke={color(f === 'vms' ? '--line-vm' : '--line-vcpu')} strokeWidth={2}
-                        dot={{ r: 4, strokeWidth: 2, stroke: color('--surface'), fill: color(f === 'vms' ? '--line-vm' : '--line-vcpu') }} activeDot={{ r: 6 }} />
+                        dot={{ r: dotR, strokeWidth: 2, stroke: color('--surface'), fill: color(f === 'vms' ? '--line-vm' : '--line-vcpu') }} activeDot={{ r: 6 }} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -265,7 +276,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
         <div className="card card-pad">
           <div className="card-head">
             <div>
-              <h2>Leaving on-prem each FY</h2>
+              <h2>Leaving on-prem each {gran === 'quarter' ? 'quarter' : 'FY'}</h2>
               <p className="sub">By target disposition (scheduled applications only)</p>
             </div>
             <div className="seg" role="group" aria-label="Metric">
@@ -281,7 +292,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={exits} margin={{ top: 16, right: 8, left: 0, bottom: 0 }} barCategoryGap="30%">
               <CartesianGrid vertical={false} stroke={color('--grid')} />
-              <XAxis dataKey="label" {...axisProps} />
+              <XAxis dataKey="label" {...axisProps} {...xTick} />
               <YAxis {...axisProps} axisLine={false} width={48} tickFormatter={(v) => fmt(v)} allowDecimals={false} />
               <Tooltip content={<ExitTip metric={exitMetric} />} cursor={{ fill: color('--grid'), opacity: 0.5 }} />
               {DISPOSITIONS.filter((d) => d.leavesOnPrem).map((d, i, arr) => (
@@ -290,7 +301,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
               ))}
             </BarChart>
           </ResponsiveContainer>
-          {exits.every((e) => e.total === 0) && (
+          {exits.every((e: { total: number }) => e.total === 0) && (
             <div className="note" style={{ textAlign: 'center' }}>
               Nothing scheduled yet – set dispositions and target FYs in the <a href="#/planner">Application Planner</a>.
             </div>
@@ -337,6 +348,8 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
           </table>
         </div>
       </div>
+
+      <UpcomingMoves />
 
       <div className="grid g-2">
         <DomainTable />
@@ -446,7 +459,7 @@ function HardwareTable() {
   return (
     <div className="card card-pad">
       <div className="card-head">
-        <div><h2>Hardware estate</h2><p className="sub">From the Clusters sheet · vendor mapping editable in Data &amp; Settings</p></div>
+        <div><h2>Hardware estate</h2><p className="sub">From the Clusters sheet · vendor mapping editable in Settings</p></div>
       </div>
       {rows.length === 0 ? (
         <div className="note">No Clusters sheet in the loaded workbook.</div>
@@ -472,6 +485,63 @@ function HardwareTable() {
         </div>
       )}
       {t.cores > 0 && <p className="note" style={{ marginTop: 10 }}>vCPU : physical core ratio {(t.vcpu / t.cores).toFixed(2)} : 1. VMware VCF subscriptions are metered on physical cores (16-core minimum per CPU), so retiring hosts — not only vCPU — is what reduces that bill.</p>}
+    </div>
+  );
+}
+
+function QuarterTick(props: { x?: number; y?: number; payload?: { value: string; index: number }; fill: string }) {
+  const { x = 0, y = 0, payload, fill } = props;
+  if (!payload) return null;
+  const v = payload.value;
+  if (v === 'Now') return <text x={x} y={y + 14} textAnchor="middle" fill={fill} fontSize={11}>Now</text>;
+  const [fy, q] = v.split(' ');
+  const showFy = q === 'Q1' || payload.index === 1;
+  return (
+    <g>
+      <text x={x} y={y + 14} textAnchor="middle" fill={fill} fontSize={10.5}>{q}</text>
+      {showFy && <text x={x} y={y + 30} textAnchor="middle" fill={fill} fontSize={11} fontWeight={600}>{fy}</text>}
+    </g>
+  );
+}
+
+function UpcomingMoves() {
+  const { inventory, plans, settings } = useStore();
+  const vms = scopeVMs(inventory.vms, settings);
+  const rows = useMemo(() => {
+    return groupApps(vms)
+      .map((a) => ({ a, p: planFor(plans, a.key) }))
+      .filter(({ p }) => DISP[p.disposition].leavesOnPrem && p.targetFY)
+      .sort((x, y) => x.p.targetFY! * 10 + (x.p.targetQ ?? 4) - (y.p.targetFY! * 10 + (y.p.targetQ ?? 4)) || y.a.vcpu - x.a.vcpu);
+  }, [vms, plans]);
+  const [all, setAll] = useState(false);
+  const shown = all ? rows : rows.slice(0, 12);
+  return (
+    <div className="card card-pad" style={{ marginBottom: 16 }}>
+      <div className="card-head">
+        <div><h2>Treatment timeline</h2><p className="sub">Scheduled applications in the order they leave on-prem ({rows.length} scheduled)</p></div>
+        <a className="btn btn-sm" href="#/planner">Open planner</a>
+      </div>
+      {rows.length === 0 ? <div className="note">No applications scheduled yet.</div> : (
+        <div className="table-wrap" style={{ borderTop: 0 }}>
+          <table className="t">
+            <thead><tr><th>Quarter</th><th>Application</th><th>Domain</th><th>Treatment</th><th className="r">VMs</th><th className="r">vCPU</th><th>Notes</th></tr></thead>
+            <tbody>
+              {shown.map(({ a, p }) => (
+                <tr key={a.key}>
+                  <td style={{ whiteSpace: 'nowrap' }}><b>{quarterLabel(p.targetFY!, p.targetQ ?? 4)}</b> <span className="muted">· {quarterRange(p.targetFY!, p.targetQ ?? 4)}</span></td>
+                  <td><span className="app-name">{a.name}</span></td>
+                  <td>{a.domain}</td>
+                  <td><span className="chip"><i className="dot" style={{ background: DISP[p.disposition].color }} />{DISP[p.disposition].short}</span></td>
+                  <td className="r num">{a.vmCount}</td>
+                  <td className="r num">{fmt(a.vcpu)}</td>
+                  <td className="muted">{p.notes}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {rows.length > 12 && <button className="btn btn-sm" style={{ marginTop: 10 }} onClick={() => setAll(!all)}>{all ? 'Show fewer' : `Show all ${rows.length}`}</button>}
+        </div>
+      )}
     </div>
   );
 }

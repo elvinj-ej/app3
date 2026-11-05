@@ -1,4 +1,4 @@
-import type { AppInfo, Cluster, Inventory, VM } from './types';
+import type { AppInfo, Cluster, Inventory, VM } from './types.ts';
 
 export const NO_APP = '(No application recorded)';
 
@@ -144,10 +144,4 @@ export function inventoryFromSheets(sheets: SheetData[], sourceFile: string): In
   }
 
   return { sourceFile, loadedAt: new Date().toISOString(), isDemo: false, vms, clusters };
-}
-
-export async function readInventoryFile(file: File): Promise<Inventory> {
-  const { default: readExcelFile } = await import('read-excel-file/browser');
-  const sheets = (await readExcelFile(file)) as unknown as SheetData[];
-  return inventoryFromSheets(sheets, file.name);
 }

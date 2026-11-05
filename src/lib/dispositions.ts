@@ -1,4 +1,4 @@
-import type { Disposition } from './types';
+import type { Disposition } from './types.ts';
 
 export interface DispositionMeta {
   id: Disposition;

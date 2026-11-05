@@ -240,3 +240,18 @@ table.t { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 
   .filters .input { width: 100%; }
   .bar-row { grid-template-columns: 110px 1fr 70px; }
 }
+
+/* ---------- overlays ---------- */
+.modal-back { position: fixed; inset: 0; background: rgb(0 0 0 / 0.35); display: grid; place-items: center; z-index: 50; padding: 16px; }
+.modal { width: min(460px, 100%); }
+.drawer { width: min(640px, 100%); max-height: 85vh; overflow: auto; }
+.toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 60; max-width: min(420px, calc(100vw - 32px)); }
+.toast { background: var(--text); color: var(--surface); padding: 10px 14px; border-radius: 8px; box-shadow: 0 6px 24px rgb(0 0 0 / 0.2); font-size: 13px; }
+.toast-err { background: var(--crit); color: #fff; }
+.diff-list { margin: 6px 0 0; padding-left: 18px; max-height: 220px; overflow: auto; font-size: 12.5px; }
+.pill-add { color: var(--good); font-weight: 600; }
+.pill-rem { color: var(--crit); font-weight: 600; }
+.hist-row { padding: 10px 0; border-top: 1px solid var(--border); font-size: 13px; }
+.hist-row:first-child { border-top: 0; }
+.arrow { color: var(--text-3); margin: 0 6px; }
+code { font-size: 12px; background: var(--surface-2); padding: 1px 4px; border-radius: 4px; }

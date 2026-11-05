@@ -1,15 +1,20 @@
 import { useEffect, useState } from 'react';
 import { useStore } from './lib/store';
 import { fyLabel } from './lib/fy';
+import { APP_NAME } from './lib/brand';
 import Executive from './pages/Executive';
 import Planner from './pages/Planner';
-import DataSettings from './pages/DataSettings';
+import InventoryPage from './pages/InventoryPage';
+import Activity from './pages/Activity';
+import SettingsPage from './pages/SettingsPage';
 
-type Route = 'summary' | 'planner' | 'data';
+type Route = 'summary' | 'planner' | 'inventory' | 'activity' | 'settings';
 const ROUTES: { id: Route; label: string }[] = [
   { id: 'summary', label: 'Executive Summary' },
   { id: 'planner', label: 'Application Planner' },
-  { id: 'data', label: 'Data & Settings' },
+  { id: 'inventory', label: 'Inventory Updates' },
+  { id: 'activity', label: 'Activity' },
+  { id: 'settings', label: 'Settings' },
 ];
 
 function readRoute(): Route {
@@ -19,7 +24,8 @@ function readRoute(): Route {
 
 export default function App() {
   const [route, setRoute] = useState<Route>(readRoute);
-  const { inventory, settings } = useStore();
+  const { ready, connError, user, setUser, hasInventory, latestUpload, settings, toasts } = useStore();
+  const [editingName, setEditingName] = useState(false);
   const [theme, setTheme] = useState<string>(() => {
     try {
       return localStorage.getItem('fp.theme') ?? 'auto';
@@ -29,6 +35,7 @@ export default function App() {
   });
 
   useEffect(() => {
+    document.title = APP_NAME;
     const on = () => setRoute(readRoute());
     addEventListener('hashchange', on);
     return () => removeEventListener('hashchange', on);
@@ -47,13 +54,14 @@ export default function App() {
     location.hash = `#/${r}`;
     window.scrollTo(0, 0);
   };
+  const needsInventory = route === 'summary' || route === 'planner';
 
   return (
     <>
       <header className="topbar">
         <div className="brand">
           <span className="brand-mark" aria-hidden>▤</span>
-          On-Prem Footprint
+          {APP_NAME}
         </div>
         <nav className="nav">
           {ROUTES.map((r) => (
@@ -63,9 +71,12 @@ export default function App() {
           ))}
         </nav>
         <div className="topbar-right">
-          <span>
-            {inventory.isDemo ? 'Demo data' : inventory.sourceFile} · Current {fyLabel(settings.currentFY)}
+          <span title={latestUpload ? `Upload #${latestUpload.id} by ${latestUpload.uploadedBy}` : ''}>
+            {latestUpload ? latestUpload.filename : 'No inventory'} · {fyLabel(settings.currentFY)}
           </span>
+          <button className="btn btn-sm" onClick={() => setEditingName(true)} title="Your name is recorded against changes you make">
+            👤 {user || 'Set name'}
+          </button>
           <select className="select select-sm" value={theme} onChange={(e) => setTheme(e.target.value)} aria-label="Theme">
             <option value="auto">Auto theme</option>
             <option value="light">Light</option>
@@ -73,18 +84,59 @@ export default function App() {
           </select>
         </div>
       </header>
-      {inventory.isDemo && (
+
+      {connError && (
         <div className="page" style={{ paddingBottom: 0 }}>
-          <div className="banner" style={{ marginBottom: 0 }}>
-            <b>Showing synthetic demo data.</b> Load your VMInfo Excel export on the Data &amp; Settings page – it is parsed
-            in your browser and never leaves this machine.
-            <button className="btn btn-sm" onClick={() => go('data')}>Load Excel</button>
+          <div className="banner" style={{ marginBottom: 0, color: 'var(--crit)' }}>
+            Cannot reach the server ({connError}). Changes will not be saved until the connection is back.
           </div>
         </div>
       )}
-      {route === 'summary' && <Executive onPlan={() => go('planner')} />}
-      {route === 'planner' && <Planner />}
-      {route === 'data' && <DataSettings />}
+
+      {!ready && !connError && <div className="page"><div className="empty">Loading…</div></div>}
+
+      {ready && needsInventory && !hasInventory && (
+        <div className="page">
+          <div className="card card-pad empty">
+            <h2 style={{ marginBottom: 8 }}>No inventory loaded yet</h2>
+            <p>Upload the latest VMInfo Excel export to get started. Treatment decisions are stored separately and carry over to every future upload.</p>
+            <button className="btn btn-primary" onClick={() => go('inventory')}>Upload VMInfo file</button>
+          </div>
+        </div>
+      )}
+
+      {ready && route === 'summary' && hasInventory && <Executive onPlan={() => go('planner')} />}
+      {ready && route === 'planner' && hasInventory && <Planner />}
+      {ready && route === 'inventory' && <InventoryPage />}
+      {ready && route === 'activity' && <Activity />}
+      {ready && route === 'settings' && <SettingsPage />}
+
+      {(ready && (!user || editingName)) && (
+        <NameDialog initial={user} onSave={(n) => { setUser(n); setEditingName(false); }} onCancel={user ? () => setEditingName(false) : undefined} />
+      )}
+
+      <div className="toasts" role="status" aria-live="polite">
+        {toasts.map((t) => (
+          <div key={t.id} className={`toast${t.kind === 'error' ? ' toast-err' : ''}`}>{t.text}</div>
+        ))}
+      </div>
     </>
+  );
+}
+
+function NameDialog({ initial, onSave, onCancel }: { initial: string; onSave: (n: string) => void; onCancel?: () => void }) {
+  const [v, setV] = useState(initial);
+  return (
+    <div className="modal-back">
+      <form className="card card-pad modal" onSubmit={(e) => { e.preventDefault(); if (v.trim()) onSave(v); }}>
+        <h2>Who's making changes?</h2>
+        <p className="sub" style={{ margin: '6px 0 14px' }}>Your name is recorded against every decision and upload so the team can see who changed what.</p>
+        <input className="input" style={{ width: '100%' }} autoFocus placeholder="e.g. Jane Smith" value={v} onChange={(e) => setV(e.target.value)} maxLength={80} />
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
+          {onCancel && <button type="button" className="btn" onClick={onCancel}>Cancel</button>}
+          <button className="btn btn-primary" disabled={!v.trim()}>Continue</button>
+        </div>
+      </form>
+    </div>
   );
 }

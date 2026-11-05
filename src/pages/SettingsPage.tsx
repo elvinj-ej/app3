@@ -1,0 +1,163 @@
+import { useRef, useState } from 'react';
+import { defaultVendor, useStore, vendorOf } from '../lib/store';
+import { fyLabel } from '../lib/fy';
+import type { Deadline, HwVendor, PlanMap } from '../lib/types';
+
+export default function SettingsPage() {
+  const { inventory, settings, updateSettings, importPlans, toast } = useStore();
+  const [draft, setDraft] = useState<Deadline[] | null>(null);
+  const planRef = useRef<HTMLInputElement>(null);
+  const deadlines = draft ?? settings.deadlines;
+  const dirty = draft !== null;
+
+  const editDl = (id: string, patch: Partial<Deadline>) => setDraft(deadlines.map((d) => (d.id === id ? { ...d, ...patch } : d)));
+
+  const localPlans = (() => {
+    try {
+      const s = localStorage.getItem('fp.plan.v1');
+      const p = s ? (JSON.parse(s) as PlanMap) : null;
+      return p && Object.keys(p).length ? p : null;
+    } catch {
+      return null;
+    }
+  })();
+
+  const doImport = async (p: PlanMap, source: string) => {
+    if (!confirm(`Import ${Object.keys(p).length} decisions from ${source}? Existing decisions for the same applications will be overwritten (the change log keeps the previous values).`)) return;
+    try {
+      const n = await importPlans(p);
+      toast(`Imported ${n} decisions`);
+    } catch (e) {
+      toast(`Import failed: ${e instanceof Error ? e.message : e}`, 'error');
+    }
+  };
+
+  const fys: number[] = [];
+  for (let fy = settings.currentFY + 1; fy <= settings.currentFY + 10; fy++) fys.push(fy);
+
+  return (
+    <div className="page">
+      <div className="page-head">
+        <div>
+          <h1>Settings</h1>
+          <p>Shared by everyone using this server. Changes are recorded and visible to others within a few seconds.</p>
+        </div>
+      </div>
+
+      <div className="grid g-2" style={{ marginBottom: 16 }}>
+        <div className="card card-pad">
+          <div className="card-head"><div><h2>Planning horizon</h2><p className="sub">FY starts 1 July · current year {fyLabel(settings.currentFY)} (from today's date)</p></div></div>
+          <div className="filters">
+            <label className="check">Project to end of
+              <select className="select" value={settings.horizonFY} onChange={(e) => updateSettings({ horizonFY: Number(e.target.value) })}>
+                {fys.map((f) => <option key={f} value={f}>{fyLabel(f)}</option>)}
+              </select>
+            </label>
+            <label className="check">
+              <input type="checkbox" checked={settings.includePoweredOff} onChange={(e) => updateSettings({ includePoweredOff: e.target.checked })} />
+              Count powered-off VMs in the footprint
+            </label>
+          </div>
+        </div>
+
+        <div className="card card-pad">
+          <div className="card-head"><div><h2>Backup &amp; import</h2><p className="sub">The database file is <code>data/footprint.db</code> on the server – back it up like any file.</p></div></div>
+          <div className="filters">
+            <a className="btn" href="api/export/treatment-plan.xlsx">Export treatment plan (Excel)</a>
+            <a className="btn" href="api/backup">Download decisions backup (JSON)</a>
+            <button className="btn" onClick={() => planRef.current?.click()}>Import decisions (JSON)…</button>
+            <input ref={planRef} type="file" accept=".json" hidden onChange={async (e) => {
+              const f = e.target.files?.[0];
+              e.target.value = '';
+              if (!f) return;
+              try {
+                const data = JSON.parse(await f.text());
+                await doImport((data.plans ?? data) as PlanMap, f.name);
+              } catch (err) {
+                toast(`Not a valid decisions file: ${err instanceof Error ? err.message : err}`, 'error');
+              }
+            }} />
+            {localPlans && (
+              <button className="btn" onClick={() => doImport(localPlans, 'the earlier browser-only version on this computer')}>
+                Import {Object.keys(localPlans).length} decisions saved in this browser
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="card card-pad" style={{ marginBottom: 16 }}>
+        <div className="card-head">
+          <div><h2>Deadlines</h2><p className="sub">Shown on the executive summary and marked on the timeline. Tick “confirmed” once the contract date is verified.</p></div>
+          <div className="filters">
+            <button className="btn btn-sm" onClick={() => setDraft([...deadlines, { id: crypto.randomUUID(), label: 'New deadline', date: new Date().toISOString().slice(0, 10), kind: 'Other', confirmed: false }])}>+ Add deadline</button>
+            {dirty && <button className="btn btn-sm" onClick={() => setDraft(null)}>Discard</button>}
+            <button className="btn btn-sm btn-primary" disabled={!dirty} onClick={async () => { await updateSettings({ deadlines }); setDraft(null); toast('Deadlines saved'); }}>Save deadlines</button>
+          </div>
+        </div>
+        <div className="table-wrap">
+          <table className="t">
+            <thead><tr><th>Label</th><th>Date</th><th>Type</th><th>Confirmed</th><th>Note</th><th /></tr></thead>
+            <tbody>
+              {deadlines.map((d) => (
+                <tr key={d.id}>
+                  <td><input className="input select-sm" style={{ width: '100%', minWidth: 200 }} value={d.label} onChange={(e) => editDl(d.id, { label: e.target.value })} /></td>
+                  <td><input className="input select-sm" type="date" value={d.date} onChange={(e) => e.target.value && editDl(d.id, { date: e.target.value })} /></td>
+                  <td>
+                    <select className="select select-sm" value={d.kind} onChange={(e) => editDl(d.id, { kind: e.target.value as Deadline['kind'] })}>
+                      <option value="VMware">VMware licence</option>
+                      <option value="Cisco">Cisco HW</option>
+                      <option value="Lenovo">Lenovo HW</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </td>
+                  <td><input type="checkbox" checked={d.confirmed} onChange={(e) => editDl(d.id, { confirmed: e.target.checked })} aria-label="Confirmed" /></td>
+                  <td><input className="input select-sm" style={{ width: '100%', minWidth: 200 }} value={d.note ?? ''} onChange={(e) => editDl(d.id, { note: e.target.value })} /></td>
+                  <td><button className="btn btn-sm btn-danger" onClick={() => setDraft(deadlines.filter((x) => x.id !== d.id))}>Remove</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="card card-pad">
+        <div className="card-head">
+          <div><h2>Cluster hardware vendor</h2><p className="sub">Default guess: clusters named “-HX-” are Cisco HyperFlex, the rest Lenovo. Used for the HW deadlines and hardware estate.</p></div>
+        </div>
+        {inventory.clusters.length === 0 ? (
+          <div className="note">No Clusters sheet in the current inventory.</div>
+        ) : (
+          <div className="table-wrap">
+            <table className="t">
+              <thead><tr><th>Cluster</th><th>Class</th><th>vCenter</th><th className="r">Hosts</th><th className="r">Cores</th><th className="r">Running VMs</th><th className="r">Running vCPU</th><th>Vendor</th></tr></thead>
+              <tbody>
+                {inventory.clusters.map((c) => (
+                  <tr key={c.name}>
+                    <td>{c.name}</td><td className="muted">{c.classification}</td><td className="muted">{c.vcenter}</td>
+                    <td className="r num">{c.hosts}</td><td className="r num">{c.cores}</td>
+                    <td className="r num">{c.runningVMs}</td><td className="r num">{c.runningVcpu}</td>
+                    <td>
+                      <select className="select select-sm" value={vendorOf(settings, c.name)}
+                        onChange={(e) => {
+                          const v = e.target.value as HwVendor;
+                          const next = { ...settings.clusterVendor };
+                          if (v === defaultVendor(c.name)) delete next[c.name];
+                          else next[c.name] = v;
+                          updateSettings({ clusterVendor: next });
+                        }}>
+                        <option value="Cisco">Cisco HyperFlex</option>
+                        <option value="Lenovo">Lenovo</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

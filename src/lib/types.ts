@@ -32,8 +32,44 @@ export interface Inventory {
   sourceFile: string;
   loadedAt: string; // ISO
   isDemo: boolean;
+  uploadId?: number;
+  uploadedBy?: string;
   vms: VM[];
   clusters: Cluster[];
+}
+
+export interface UploadDiff {
+  previousUploadId: number | null;
+  vmDelta: number;
+  vcpuDelta: number;
+  vmsAdded: string[];
+  vmsRemoved: string[];
+  appsAdded: { key: string; vms: number; vcpu: number }[];
+  appsRemoved: { key: string; vms: number; vcpu: number; hadDecision: boolean }[];
+}
+
+export interface UploadMeta {
+  id: number;
+  filename: string;
+  uploadedBy: string;
+  uploadedAt: string;
+  note: string;
+  vmCount: number;
+  poweredOn: number;
+  vcpu: number;
+  appCount: number;
+  clusterCount: number;
+  diff: UploadDiff;
+}
+
+export interface HistoryEntry {
+  id: number;
+  appKey: string;
+  action: 'update' | 'bulk' | 'rename' | 'import';
+  before: Partial<AppPlan> | null;
+  after: Partial<AppPlan> | null;
+  changedBy: string;
+  changedAt: string;
 }
 
 export type Disposition =
@@ -53,6 +89,10 @@ export interface AppPlan {
   targetFY?: number; // e.g. 28 => FY28
   targetQ?: Quarter; // quarter of the FY in which it leaves on-prem (default Q4)
   notes?: string;
+  // server-maintained
+  version?: number;
+  updatedBy?: string;
+  updatedAt?: string;
 }
 
 export type PlanMap = Record<string, AppPlan>;

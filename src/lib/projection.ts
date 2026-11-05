@@ -1,7 +1,7 @@
-import { DISP, DISPOSITIONS } from './dispositions';
-import { fyEnd, fyLabel, fyQuarterEnd } from './fy';
-import { parseApp } from './parse';
-import type { AppInfo, AppPlan, Disposition, PlanMap, Settings, VM } from './types';
+import { DISP, DISPOSITIONS } from './dispositions.ts';
+import { fyEnd, fyLabel, fyOf, fyQuarterEnd, fyQuarterOf, quarterLabel } from './fy.ts';
+import { parseApp } from './parse.ts';
+import type { AppInfo, AppPlan, Disposition, PlanMap, Settings, VM } from './types.ts';
 
 export const DEFAULT_PLAN: AppPlan = { disposition: 'tbd' };
 
@@ -44,6 +44,36 @@ export function footprintAt(vms: VM[], plans: PlanMap, at: Date, filter?: (v: VM
   return totals(remaining);
 }
 
+export type Granularity = 'quarter' | 'fy';
+
+export interface Period {
+  label: string; // "FY28 Q1" or "FY28"
+  fy: number;
+  q: number; // 1-4 (4 for FY granularity)
+  end: Date;
+}
+
+/** Reporting periods from the current quarter / FY up to the end of the horizon FY. */
+export function periods(settings: Settings, gran: Granularity, today = new Date()): Period[] {
+  const out: Period[] = [];
+  if (gran === 'fy') {
+    for (let fy = settings.currentFY; fy <= settings.horizonFY; fy++) out.push({ label: fyLabel(fy), fy, q: 4, end: fyEnd(fy) });
+    return out;
+  }
+  const startQ = settings.currentFY === fyOf(today) ? fyQuarterOf(today) : 1;
+  for (let fy = settings.currentFY; fy <= settings.horizonFY; fy++) {
+    for (let q = fy === settings.currentFY ? startQ : 1; q <= 4; q++) {
+      out.push({ label: quarterLabel(fy, q), fy, q, end: fyQuarterEnd(fy, q) });
+    }
+  }
+  return out;
+}
+
+export function periodIndexFor(ps: Period[], d: Date): number {
+  for (let i = 0; i < ps.length; i++) if (d <= ps[i].end) return i;
+  return -1;
+}
+
 export interface TrendPoint {
   label: string;
   vms: number;
@@ -52,37 +82,39 @@ export interface TrendPoint {
   vcpuPct: number;
 }
 
-/** "Now" plus the projected on-prem footprint at the end of each FY up to the horizon. */
-export function trend(vms: VM[], plans: PlanMap, settings: Settings): TrendPoint[] {
+/** "Now" plus the projected on-prem footprint at the end of each period up to the horizon. */
+export function trend(vms: VM[], plans: PlanMap, settings: Settings, gran: Granularity = 'fy'): TrendPoint[] {
   const base = totals(vms);
   const pct = (n: number, d: number) => (d ? Math.round((n / d) * 1000) / 10 : 0);
-  const pts: TrendPoint[] = [
-    { label: 'Now', vms: base.vms, vcpu: base.vcpu, vmsPct: 100, vcpuPct: 100 },
-  ];
-  for (let fy = settings.currentFY; fy <= settings.horizonFY; fy++) {
-    const t = footprintAt(vms, plans, fyEnd(fy));
-    pts.push({ label: fyLabel(fy), vms: t.vms, vcpu: t.vcpu, vmsPct: pct(t.vms, base.vms), vcpuPct: pct(t.vcpu, base.vcpu) });
+  const pts: TrendPoint[] = [{ label: 'Now', vms: base.vms, vcpu: base.vcpu, vmsPct: 100, vcpuPct: 100 }];
+  for (const p of periods(settings, gran)) {
+    const t = footprintAt(vms, plans, p.end);
+    pts.push({ label: p.label, vms: t.vms, vcpu: t.vcpu, vmsPct: pct(t.vms, base.vms), vcpuPct: pct(t.vcpu, base.vcpu) });
   }
   return pts;
 }
 
-export type ExitRow = { label: string; total: number } & Partial<Record<Disposition, number>>;
+export type ExitRow = { label: string; total: number; apps: number } & Partial<Record<Disposition, number>>;
 
-/** vCPU (or VMs) leaving on-prem in each FY, split by disposition. */
-export function exitsByFY(vms: VM[], plans: PlanMap, settings: Settings, metric: 'vcpu' | 'vms'): ExitRow[] {
-  const rows: ExitRow[] = [];
-  for (let fy = settings.currentFY; fy <= settings.horizonFY; fy++) {
-    rows.push({ label: fyLabel(fy), total: 0 });
-  }
+/** vCPU (or VMs) leaving on-prem in each period, split by disposition. Exits past the horizon are omitted. */
+export function exitsBy(vms: VM[], plans: PlanMap, settings: Settings, metric: 'vcpu' | 'vms', gran: Granularity = 'fy'): ExitRow[] {
+  const ps = periods(settings, gran);
+  const rows: ExitRow[] = ps.map((p) => ({ label: p.label, total: 0, apps: 0 }));
+  const appSeen = ps.map(() => new Set<string>());
   for (const v of vms) {
-    const p = planFor(plans, v.appKey);
-    if (!DISP[p.disposition].leavesOnPrem || !p.targetFY) continue;
-    const idx = Math.min(Math.max(p.targetFY, settings.currentFY), settings.horizonFY) - settings.currentFY;
+    const d = exitDate(planFor(plans, v.appKey));
+    if (!d) continue;
+    let idx = periodIndexFor(ps, d);
+    if (idx < 0) continue;
+    if (d < new Date() && idx > 0) idx = 0;
     const r = rows[idx];
+    const disp = planFor(plans, v.appKey).disposition;
     const amt = metric === 'vcpu' ? v.vcpu : 1;
-    r[p.disposition] = (r[p.disposition] ?? 0) + amt;
+    r[disp] = (r[disp] ?? 0) + amt;
     r.total += amt;
+    appSeen[idx].add(v.appKey);
   }
+  rows.forEach((r, i) => (r.apps = appSeen[i].size));
   return rows;
 }
 

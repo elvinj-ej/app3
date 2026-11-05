@@ -1,12 +1,15 @@
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useStore } from '../lib/store';
 import { DISP, DISPOSITIONS } from '../lib/dispositions';
-import { fyLabel } from '../lib/fy';
+import { fyLabel, fyOf, fyQuarterOf, quarterLabel, quarterRange } from '../lib/fy';
 import { groupApps, planFor, scopeVMs, type AppRow } from '../lib/projection';
 import { parseApp, TIER_ORDER } from '../lib/parse';
 import { fmt } from '../lib/useColors';
 import type { AppPlan, Disposition, Quarter, VM } from '../lib/types';
 import { downloadCSV } from '../lib/exporter';
+import { api } from '../lib/api';
+import { HistoryRow, timeAgo, fmtDateTime } from '../components/common';
+import type { HistoryEntry } from '../lib/types';
 
 type View = 'apps' | 'vms';
 type SortDir = 1 | -1;
@@ -42,8 +45,18 @@ export default function Planner() {
   const sites = useMemo(() => [...new Set(vms.map((v) => v.site))].sort(), [vms]);
   const envs = useMemo(() => [...new Set(vms.map((v) => v.environment))].sort(), [vms]);
 
-  const fyOptions: number[] = [];
-  for (let fy = settings.currentFY; fy <= settings.horizonFY + 2; fy++) fyOptions.push(fy);
+  const targetOptions = useMemo(() => {
+    const out: { fy: number; q: number }[] = [];
+    const now = new Date();
+    for (let fy = settings.currentFY; fy <= settings.horizonFY + 2; fy++) {
+      for (let q = 1; q <= 4; q++) {
+        if (fy === fyOf(now) && q < fyQuarterOf(now)) continue;
+        out.push({ fy, q });
+      }
+    }
+    return out;
+  }, [settings.currentFY, settings.horizonFY]);
+  const [historyFor, setHistoryFor] = useState<string | null>(null);
 
   const ql = q.trim().toLowerCase();
   const vmMatches = (v: VM) =>
@@ -158,8 +171,8 @@ export default function Planner() {
         <div>
           <h1>Application planner</h1>
           <p>
-            Capture a disposition and target FY for each application (from <code>Application_Primary</code>). {decided} of{' '}
-            {allApps.length} applications decided. Changes save automatically in this browser.
+            Capture a treatment and the FY quarter it leaves on-prem for each application (from <code>Application_Primary</code>). {decided} of{' '}
+            {allApps.length} applications decided. Changes are saved to the shared database and appear for everyone within seconds.
           </p>
         </div>
         <div className="filters">
@@ -167,7 +180,8 @@ export default function Planner() {
             <button aria-pressed={view === 'apps'} onClick={() => setView('apps')}>By application</button>
             <button aria-pressed={view === 'vms'} onClick={() => setView('vms')}>By VM</button>
           </div>
-          <button className="btn" onClick={exportView}>Export CSV</button>
+          <a className="btn btn-primary" href="api/export/treatment-plan.xlsx">Export treatment plan (Excel)</a>
+          <button className="btn" onClick={exportView}>Export view (CSV)</button>
         </div>
       </div>
 
@@ -222,8 +236,9 @@ export default function Planner() {
                   <AppTh k="vcpu" r>vCPU</AppTh>
                   <th>Envs</th>
                   <AppTh k="disposition">Disposition</AppTh>
-                  <AppTh k="target">Leaves on-prem</AppTh>
-                  <th style={{ minWidth: 180 }}>Notes</th>
+                  <AppTh k="target">Off on-prem by (FY · quarter)</AppTh>
+                  <th style={{ minWidth: 150 }}>Notes</th>
+                  <th>Last change</th>
                 </tr>
               </thead>
               <tbody>
@@ -237,7 +252,7 @@ export default function Planner() {
                       <tr className={selected.has(a.key) ? 'sel' : undefined}>
                         <td><input type="checkbox" aria-label={`Select ${a.name}`} checked={selected.has(a.key)} onChange={() => setSelected((s) => toggle(s, a.key))} /></td>
                         <td><button className="expander" aria-expanded={open} aria-label="Show VMs" onClick={() => setExpanded((s) => toggle(s, a.key))}>{open ? '▼' : '▶'}</button></td>
-                        <td style={{ minWidth: 220 }}>
+                        <td style={{ minWidth: 200 }}>
                           <div className="app-name">{a.name}</div>
                           <div className="app-svc">{a.service}{a.owner ? ` · ${a.owner}` : ''}</div>
                         </td>
@@ -245,7 +260,7 @@ export default function Planner() {
                         <td className="muted">{a.tier}</td>
                         <td className="r num">{a.vmCount}</td>
                         <td className="r num"><b>{fmt(a.vcpu)}</b></td>
-                        <td><div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>{a.environments.map((e) => <span className="chip" key={e}>{e}</span>)}</div></td>
+                        <td className="muted" style={{ fontSize: 12, maxWidth: 110 }} title={a.environments.join(', ')}>{a.environments.slice(0, 2).join(', ')}{a.environments.length > 2 ? ` +${a.environments.length - 2}` : ''}</td>
                         <td>
                           <div className="disp-cell">
                             <i className="dot" style={{ background: meta.color }} />
@@ -256,9 +271,16 @@ export default function Planner() {
                           </div>
                         </td>
                         <td>
-                          <TargetPicker plan={p} fyOptions={fyOptions} onChange={(patch) => setPlan(a.key, patch)} />
+                          <TargetPicker plan={p} options={targetOptions} onChange={(patch) => setPlan(a.key, patch)} />
                         </td>
                         <td><NotesInput value={p.notes ?? ''} onCommit={(notes) => setPlan(a.key, { notes })} /></td>
+                        <td style={{ whiteSpace: 'nowrap' }}>
+                          {p.updatedBy ? (
+                            <button className="expander" style={{ width: 'auto', textAlign: 'left', fontSize: 12 }} title={`${fmtDateTime(p.updatedAt!)} – click for history`} onClick={() => setHistoryFor(a.key)}>
+                              {p.updatedBy}<br /><span className="muted">{timeAgo(p.updatedAt)}</span>
+                            </button>
+                          ) : <span className="muted">—</span>}
+                        </td>
                       </tr>
                       {open && subVms.map((v) => (
                         <tr className="sub" key={v.name}>
@@ -268,13 +290,13 @@ export default function Planner() {
                           <td className="muted" colSpan={1}>{v.poweredOn ? 'On' : 'Off'}</td>
                           <td className="r num">{v.vcpu}</td>
                           <td><span className="chip">{v.environment}</span></td>
-                          <td className="muted" colSpan={3}>{v.location} · {fmt(v.memGB)} GB RAM · {fmt(v.storageProvGB)} GB disk</td>
+                          <td className="muted" colSpan={4}>{v.location} · {fmt(v.memGB)} GB RAM · {fmt(v.storageProvGB)} GB disk</td>
                         </tr>
                       ))}
                     </Fragment>
                   );
                 })}
-                {apps.length === 0 && <tr><td colSpan={11} className="empty">No applications match these filters.</td></tr>}
+                {apps.length === 0 && <tr><td colSpan={12} className="empty">No applications match these filters.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -311,7 +333,7 @@ export default function Planner() {
                       <td className="r num">{v.vcpu}</td>
                       <td className="r num">{fmt(v.memGB)}</td>
                       <td><span className="chip"><i className="dot" style={{ background: meta.color }} />{meta.short}</span></td>
-                      <td className="muted">{p.targetFY && meta.leavesOnPrem ? `${fyLabel(p.targetFY)} Q${p.targetQ ?? 4}` : '—'}</td>
+                      <td className="muted">{p.targetFY && meta.leavesOnPrem ? quarterLabel(p.targetFY, p.targetQ ?? 4) : '—'}</td>
                     </tr>
                   );
                 })}
@@ -325,32 +347,67 @@ export default function Planner() {
       </div>
 
       {view === 'apps' && selected.size > 0 && (
-        <BulkBar count={selected.size} fyOptions={fyOptions}
+        <BulkBar count={selected.size} options={targetOptions}
           onApply={(patch) => { setPlans([...selected], patch); }}
           onClear={() => setSelected(new Set())} />
       )}
+      {historyFor && <HistoryModal appKey={historyFor} onClose={() => setHistoryFor(null)} />}
     </div>
   );
 }
 
-function TargetPicker({ plan, fyOptions, onChange }: { plan: AppPlan; fyOptions: number[]; onChange: (p: Partial<AppPlan>) => void }) {
-  const leaves = DISP[plan.disposition].leavesOnPrem;
-  if (!leaves) return <span className="muted">{plan.disposition === 'tbd' ? '—' : 'Stays'}</span>;
+function HistoryModal({ appKey, onClose }: { appKey: string; onClose: () => void }) {
+  const [items, setItems] = useState<HistoryEntry[] | null>(null);
+  useEffect(() => {
+    api<HistoryEntry[]>(`/history?app=${encodeURIComponent(appKey)}`).then(setItems).catch(() => setItems([]));
+  }, [appKey]);
   return (
-    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-      <select className="select select-sm" value={plan.targetFY ?? ''} aria-label="Target FY"
-        style={!plan.targetFY ? { borderColor: 'var(--warn-ink)' } : undefined}
-        onChange={(e) => onChange({ targetFY: e.target.value ? Number(e.target.value) : undefined })}>
-        <option value="">FY…</option>
-        {fyOptions.map((fy) => <option key={fy} value={fy}>{fyLabel(fy)}</option>)}
-      </select>
-      <select className="select select-sm" value={plan.targetQ ?? 4} aria-label="Target quarter" disabled={!plan.targetFY}
-        onChange={(e) => onChange({ targetQ: Number(e.target.value) as Quarter })}>
-        <option value={1}>Q1 (Jul–Sep)</option>
-        <option value={2}>Q2 (Oct–Dec)</option>
-        <option value={3}>Q3 (Jan–Mar)</option>
-        <option value={4}>Q4 (Apr–Jun)</option>
-      </select>
+    <div className="modal-back" onClick={onClose}>
+      <div className="card card-pad drawer" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Change history">
+        <div className="card-head">
+          <div><h2>Change history</h2><p className="sub">{appKey}</p></div>
+          <button className="btn btn-sm" onClick={onClose}>Close</button>
+        </div>
+        {items === null ? <div className="note">Loading…</div> : items.length === 0 ? <div className="note">No changes recorded.</div> : items.map((h) => <HistoryRow key={h.id} h={h} />)}
+      </div>
+    </div>
+  );
+}
+
+const tKey = (fy?: number, q?: number) => (fy ? `${fy}-${q ?? 4}` : '');
+
+function TargetSelect({ value, options, onChange, placeholder, small = true }: { value: string; options: { fy: number; q: number }[]; onChange: (v: string) => void; placeholder: string; small?: boolean }) {
+  const hasValue = !value || options.some((o) => tKey(o.fy, o.q) === value);
+  const fys = [...new Set(options.map((o) => o.fy))];
+  return (
+    <select className={`select${small ? ' select-sm' : ''}`} value={value} onChange={(e) => onChange(e.target.value)} aria-label="Target FY and quarter">
+      <option value="">{placeholder}</option>
+      {!hasValue && <option value={value}>{quarterLabel(Number(value.split('-')[0]), Number(value.split('-')[1]))} (past)</option>}
+      {fys.map((fy) => (
+        <optgroup key={fy} label={fyLabel(fy)}>
+          {options.filter((o) => o.fy === fy).map((o) => (
+            <option key={o.q} value={tKey(o.fy, o.q)}>{quarterLabel(o.fy, o.q)} · {quarterRange(o.fy, o.q)}</option>
+          ))}
+        </optgroup>
+      ))}
+    </select>
+  );
+}
+
+function TargetPicker({ plan, options, onChange }: { plan: AppPlan; options: { fy: number; q: number }[]; onChange: (p: Partial<AppPlan>) => void }) {
+  const leaves = DISP[plan.disposition].leavesOnPrem;
+  if (!leaves) return <span className="muted">{plan.disposition === 'tbd' ? '—' : 'Stays on-prem'}</span>;
+  const v = tKey(plan.targetFY, plan.targetQ);
+  return (
+    <div style={!plan.targetFY ? { outline: '1px solid var(--warn-ink)', borderRadius: 6, display: 'inline-block' } : undefined}>
+      <TargetSelect value={v} options={options} placeholder="Choose quarter…"
+        onChange={(val) => {
+          if (!val) onChange({ targetFY: undefined, targetQ: undefined });
+          else {
+            const [fy, q] = val.split('-').map(Number);
+            onChange({ targetFY: fy, targetQ: q as Quarter });
+          }
+        }} />
     </div>
   );
 }
@@ -370,33 +427,28 @@ function NotesInput({ value, onCommit }: { value: string; onCommit: (v: string) 
   );
 }
 
-function BulkBar({ count, fyOptions, onApply, onClear }: { count: number; fyOptions: number[]; onApply: (p: Partial<AppPlan>) => void; onClear: () => void }) {
+function BulkBar({ count, options, onApply, onClear }: { count: number; options: { fy: number; q: number }[]; onApply: (p: Partial<AppPlan>) => void; onClear: () => void }) {
   const [d, setD] = useState<Disposition | ''>('');
-  const [fy, setFy] = useState<string>('');
-  const [qtr, setQtr] = useState<string>('');
+  const [t, setT] = useState('');
   return (
     <div className="bulkbar">
       <b>{count} selected</b>
       <select className="select select-sm" value={d} onChange={(e) => setD(e.target.value as Disposition)} aria-label="Bulk disposition">
-        <option value="">Disposition (unchanged)</option>
+        <option value="">Treatment (unchanged)</option>
         {DISPOSITIONS.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
       </select>
-      <select className="select select-sm" value={fy} onChange={(e) => setFy(e.target.value)} aria-label="Bulk FY">
-        <option value="">Target FY (unchanged)</option>
-        {fyOptions.map((f) => <option key={f} value={f}>{fyLabel(f)}</option>)}
-      </select>
-      <select className="select select-sm" value={qtr} onChange={(e) => setQtr(e.target.value)} aria-label="Bulk quarter">
-        <option value="">Quarter (unchanged)</option>
-        {[1, 2, 3, 4].map((x) => <option key={x} value={x}>Q{x}</option>)}
-      </select>
-      <button className="btn btn-sm" disabled={!d && !fy && !qtr}
+      <TargetSelect value={t} options={options} onChange={setT} placeholder="Target quarter (unchanged)" />
+      <button className="btn btn-sm" disabled={!d && !t}
         onClick={() => {
           const patch: Partial<AppPlan> = {};
           if (d) patch.disposition = d;
-          if (fy) patch.targetFY = Number(fy);
-          if (qtr) patch.targetQ = Number(qtr) as Quarter;
+          if (t) {
+            const [fy, q] = t.split('-').map(Number);
+            patch.targetFY = fy;
+            patch.targetQ = q as Quarter;
+          }
           onApply(patch);
-        }}>Apply</button>
+        }}>Apply to {count}</button>
       <button className="btn btn-sm" onClick={onClear} style={{ marginLeft: 'auto' }}>Clear selection</button>
     </div>
   );
