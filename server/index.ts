@@ -465,6 +465,12 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK'] as const) {
   ]);
   if (n) console.log(`  Added ${n} application mapping rule (Terraform)`);
 }
+{
+  const n = store.seedRules('seed_rules_2026_11_d', [
+    { kind: 'merge', source: 'IIS/Powershell - Tier0 - ISD (For EUC team)', target: 'IIS/Powershell - Tier0 - ISD (Scheduled Scripts)', components: true, note: 'One IIS/Powershell application', createdBy: SEED_BY },
+  ]);
+  if (n) console.log(`  Added ${n} application mapping rule (IIS/Powershell)`);
+}
 
 /** Earlier versions did not store the RVTools utilisation columns – re-read them from the stored original files once. */
 async function backfillUsage() {
