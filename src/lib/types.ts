@@ -21,6 +21,8 @@ export interface VM {
   origAppKey?: string;
   /** Set by scopeVMs: the VM sits on a cluster flagged for data sovereignty. */
   pinned?: boolean;
+  /** Set when the VM belongs to a merged application shown with components (e.g. 'Clinical Fitting Software'). */
+  component?: string;
 }
 
 export interface Cluster {
@@ -157,6 +159,8 @@ export interface AppRule {
   source: string;
   /** Application_Primary the VMs are counted under */
   target: string;
+  /** merge rules: show the merged applications as components of the target */
+  components?: boolean;
   note: string;
   createdBy: string;
   createdAt: string;

@@ -1,4 +1,4 @@
-import { NO_APP } from './parse.ts';
+import { NO_APP, parseApp } from './parse.ts';
 import type { AppRule, Inventory, RuleEffect, VM } from './types.ts';
 
 /**
@@ -29,5 +29,25 @@ export function applyRules(inv: Inventory, rules: AppRule[]): { inventory: Inven
     }
     return key === orig ? v : { ...v, appKey: key, origAppKey: orig };
   });
-  return { inventory: { ...inv, vms }, effects };
+  // Merged applications shown with components: every VM of the target is labelled with the service of its original label.
+  const compTargets = new Set(rules.filter((r) => r.kind === 'merge' && r.components).map((r) => finalTarget(r.target, merges)));
+  const out = compTargets.size
+    ? vms.map((v) => (compTargets.has(v.appKey) ? { ...v, component: componentName(v.origAppKey && v.origAppKey !== NO_APP ? v.origAppKey : v.appKey) } : v))
+    : vms;
+  return { inventory: { ...inv, vms: out }, effects };
+}
+
+function finalTarget(key: string, merges: Map<string, AppRule>): string {
+  for (let i = 0; i < 5; i++) {
+    const m = merges.get(key);
+    if (!m || m.target === key) break;
+    key = m.target;
+  }
+  return key;
+}
+
+/** Component label for an Application_Primary: its service text, else its name. */
+export function componentName(key: string): string {
+  const a = parseApp(key);
+  return a.service || a.name;
 }

@@ -199,6 +199,7 @@ function MappingRules() {
   const [source, setSource] = useState('');
   const [target, setTarget] = useState('');
   const [note, setNote] = useState('');
+  const [comps, setComps] = useState(true);
   const [choice, setChoice] = useState<{ source: AppPlan; target: AppPlan } | null>(null);
 
   const load = () => api<RuleRow[]>('/rules').then(setRules).catch(() => setRules([]));
@@ -214,7 +215,7 @@ function MappingRules() {
 
   const create = async (keep?: 'target' | 'source' | 'both') => {
     try {
-      await api('/rules', { json: { kind, source, target, note, keep } });
+      await api('/rules', { json: { kind, source, target, note, keep, components: kind === 'merge' && comps } });
       setChoice(null);
       setSource('');
       setTarget('');
@@ -253,7 +254,13 @@ function MappingRules() {
           <tbody>
             {(rules ?? []).map((r) => (
               <tr key={r.id}>
-                <td>{r.kind === 'merge' ? 'Merge application' : 'Assign VM'}{r.note && <div className="muted" style={{ fontSize: 12 }}>{r.note}</div>}</td>
+                <td>{r.kind === 'merge' ? 'Merge application' : 'Assign VM'}{r.note && <div className="muted" style={{ fontSize: 12 }}>{r.note}</div>}
+                  {r.kind === 'merge' && (
+                    <label className="check" style={{ fontSize: 12, marginTop: 4 }} title="Show this merged label as an expandable component of the target application">
+                      <input type="checkbox" checked={!!r.components} onChange={async (e) => { try { await api(`/rules/${r.id}`, { method: 'PATCH', json: { components: e.target.checked } }); await refresh(); await load(); } catch (err) { toast(String(err instanceof Error ? err.message : err), 'error'); } }} />
+                      as component
+                    </label>
+                  )}</td>
                 <td style={{ maxWidth: 320 }}>{r.source}</td>
                 <td style={{ maxWidth: 320 }}><b>{r.target}</b></td>
                 <td className="r num">{r.effect.vms}</td>
@@ -283,6 +290,7 @@ function MappingRules() {
         <input className="input" style={{ flex: '1 1 260px', width: 'auto' }} list="rule-tgt" value={target} onChange={(e) => setTarget(e.target.value)} placeholder="Count it as application…" aria-label="Rule target" />
         <datalist id="rule-tgt">{targets.map((o) => <option key={o} value={o} />)}</datalist>
         <input className="input" style={{ flex: '0 1 200px', width: 'auto' }} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" maxLength={500} />
+        {kind === 'merge' && <label className="check" title="The merged label stays visible as an expandable component (e.g. Custom Sound ▸ Analytics)"><input type="checkbox" checked={comps} onChange={(e) => setComps(e.target.checked)} /> keep as component</label>}
         <button className="btn btn-primary btn-sm" disabled={!srcOk || !tgtOk} onClick={() => create()}>Add rule</button>
       </div>
       {kind === 'merge' && source && plans[source] && srcOk && (

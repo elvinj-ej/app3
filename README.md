@@ -97,6 +97,11 @@ in the Excel *VMs* and *Mapping rules* sheets), are logged in Activity and can b
 needed* once the source disappears from the VMInfo file, for example after the CMDB has been corrected. Merging never deletes a
 decision without asking: a decision on the merged application moves to the target, and if both have one you choose.
 
+**Components:** a merge rule can keep the merged labels as *components*. The application then has one treatment,
+but expanding it in the planner shows each component (from the label's service text) with its owners and VMs, for
+example Custom Sound ▸ Clinical Fitting Software, Application testing, Package testing and Analytics. The Excel *VMs* sheet has a
+Component column. You can switch this per rule on the Inventory Updates page.
+
 ### Collaboration
 
 When someone first opens the app, it asks for their name, which is then recorded against every change and upload.

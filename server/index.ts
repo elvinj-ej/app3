@@ -270,7 +270,7 @@ api.get('/rules', (_req, res) => {
 });
 
 api.post('/rules', wrap((req, res) => {
-  const { kind, source, target, note, keep } = req.body ?? {};
+  const { kind, source, target, note, keep, components } = req.body ?? {};
   if (kind !== 'merge' && kind !== 'vm') throw new HttpError(400, 'kind must be merge or vm');
   const src = String(source ?? '').trim();
   const tgt = String(target ?? '').trim();
@@ -288,8 +288,13 @@ api.post('/rules', wrap((req, res) => {
       throw new HttpError(409, 'Both applications have a decision – choose which one to keep', { needsChoice: true, source: sp, target: tp });
     }
   }
-  const rule = store.tx(() => store.addRule({ kind, source: src, target: tgt, note: String(note ?? '').slice(0, 500), createdBy: userOf(req) }, { keep: keep === 'source' ? 'source' : 'target', discardSource: keep === 'target' }));
+  const rule = store.tx(() => store.addRule({ kind, source: src, target: tgt, components: kind === 'merge' && !!components, note: String(note ?? '').slice(0, 500), createdBy: userOf(req) }, { keep: keep === 'source' ? 'source' : 'target', discardSource: keep === 'target' }));
   res.json({ rule, rev: store.rev() });
+}));
+
+api.patch('/rules/:id', wrap((req, res) => {
+  store.tx(() => store.setRuleComponents(Number(req.params.id), !!req.body?.components, userOf(req)));
+  res.json({ ok: true, rev: store.rev() });
 }));
 
 api.delete('/rules/:id', wrap((req, res) => {
@@ -438,6 +443,21 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK'] as const) {
     store.close();
     process.exit(0);
   });
+}
+
+// v2.7 merges agreed with the owner (Nov 2026). Main label = the variant with the most VMs.
+{
+  const C = (target: string, sources: string[], note: string, components = true) => sources.map((source) => ({ kind: 'merge' as const, source, target, components, note, createdBy: SEED_BY }));
+  const n = store.seedRules('seed_rules_2026_11_b', [
+    ...C('Test VMs_EUC team - TierX - ISD (For EUC team)', ['Test VMs_EUC team - TierX - ISD (SAP testing)', 'Test VMs_EUC team - TierX - ISD (Password manager)'], 'One EUC test application'),
+    ...C('Test VMs_Hosting team - TierX - ISD (For Hosting team)', ['Test VMs_Hosting team - TierX - ISD (Dev & testing)', 'Test VMs_Hosting team - TierX - ISD (For testing purpose)', 'Test VMs_Hosting team - TierX - ISD (Template)'], 'One Hosting test application'),
+    ...C('EMS/Siemens - TierX - Facility (Environment Mgmt System Sydney)', ['EMS/Siemens - TierX - Facility (Environment Mgmt System Brisbane)', 'EMS/Siemens - TierX - Facility (Environment Mgmt System ChengDu)'], 'One EMS/Siemens application'),
+    ...C('Custom Sound - TierX - R&D (Clinical Fitting Software)', ['Custom Sound - TierX - R&D (Application testing)', 'Custom Sound - TierX - R&D (Package testing)', 'Custom Sound - TierX - R&D (Analytics)'], 'One Custom Sound application'),
+    ...C('TeamCity - TierX - R&D (Build agent)', ['TeamCity - TierX - R&D (Build & Deployment Services)', 'TeamCity - TierX - R&D (Source code)'], 'One TeamCity application'),
+    ...C('System Continuous Integration - TierX - R&D (Build agent)', ['System Continuous Integration - TierX - R&D (GIT Fusion)'], 'One System Continuous Integration application'),
+    ...C('UI Path (Robotic Process Automation) (CSV) - Tier2 - ISD (Business Process Automation)', ['UI Path (CSV) - Tier2 - ISD (Robotic Process Automation)'], 'Duplicate UI Path label', false),
+  ]);
+  if (n) console.log(`  Added ${n} application mapping rules (v2.7)`);
 }
 
 /** Earlier versions did not store the RVTools utilisation columns – re-read them from the stored original files once. */

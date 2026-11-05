@@ -280,7 +280,7 @@ export default function Planner() {
                         <td><button className="expander" aria-expanded={open} aria-label="Show VMs" onClick={() => setExpanded((s) => toggle(s, a.key))}>{open ? '▼' : '▶'}</button></td>
                         <td style={{ minWidth: 200 }}>
                           <div className="app-name">{a.name}</div>
-                          <div className="app-svc">{a.service}{a.owner ? ` · ${a.owner}` : ''}</div>
+                          <div className="app-svc">{(() => { const cs = [...new Set(a.vms.map((v) => v.component).filter(Boolean))]; return cs.length ? `${cs.length} components: ${cs.join(', ')}` : `${a.service}${a.owner ? ` · ${a.owner}` : ''}`; })()}</div>
                           {pinnedVms.length > 0 && (
                             <div className="pin-badge" title={[...new Set(pinnedVms.map((v) => `${v.location}${sov[v.location] ? ` – ${sov[v.location]}` : ''}`))].join('\n')}>
                               🔒 {fullyPinned ? 'All' : `${pinnedVms.length} of ${a.vmCount}`} VMs pinned – data sovereignty ({[...new Set(pinnedVms.map((v) => v.location))].join(', ')})
@@ -320,7 +320,8 @@ export default function Planner() {
                           ) : <span className="muted">—</span>}
                         </td>
                       </tr>
-                      {open && subVms.map((v) => (
+                      {open && (() => {
+                        const vmRow = (v: VM) => (
                         <tr className={`sub${v.pinned && p.disposition !== 'retire' ? ' pinned' : ''}`} key={v.name}>
                           <td /><td />
                           <td colSpan={2}>{v.name} <span className="muted">· {v.os || 'OS n/a'}</span>{v.origAppKey && <div className="muted" style={{ fontSize: 11 }}>↪ mapped from “{v.origAppKey}”</div>}
@@ -331,7 +332,23 @@ export default function Planner() {
                           <td><span className="chip">{v.environment}</span></td>
                           <td className="muted" colSpan={5}>{v.location} · {fmt(v.memGB)} GB RAM · {fmt(v.storageProvGB)} GB disk</td>
                         </tr>
-                      ))}
+                        );
+                        if (!subVms.some((v) => v.component)) return subVms.map(vmRow);
+                        const comps = new Map<string, VM[]>();
+                        for (const v of subVms) comps.set(v.component ?? a.name, [...(comps.get(v.component ?? a.name) ?? []), v]);
+                        return [...comps.entries()].sort((x, y) => y[1].length - x[1].length || x[0].localeCompare(y[0])).map(([c, cv]) => (
+                          <Fragment key={`c:${c}`}>
+                            <tr className="sub comp">
+                              <td /><td />
+                              <td colSpan={2}><b>▸ {c}</b><div className="muted" style={{ fontSize: 11 }}>{[...new Set(cv.map((v) => v.owner).filter((o) => o && o !== 'None'))].join('; ') || 'owner not recorded'}</div></td>
+                              <td /><td className="muted">{cv.length} VM{cv.length === 1 ? '' : 's'}</td>
+                              <td className="r num"><b>{cv.reduce((x, v) => x + v.vcpu, 0)}</b></td>
+                              <td colSpan={6} className="muted">component of {a.name}</td>
+                            </tr>
+                            {cv.map(vmRow)}
+                          </Fragment>
+                        ));
+                      })()}
                     </Fragment>
                   );
                 })}

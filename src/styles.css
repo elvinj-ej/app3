@@ -328,3 +328,6 @@ table.mx { width: 100%; border-collapse: separate; border-spacing: 0; font-size:
 .kpi-2rows .kpi-span2 { grid-column: span 2; }
 @media (max-width: 1000px) { .g-kpi.kpi-2rows { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 560px) { .g-kpi.kpi-2rows { grid-template-columns: minmax(0, 1fr); } .kpi-2rows .kpi-span2, .kpi-wide { grid-column: auto; } }
+
+.t tr.sub.comp td { background: var(--surface-2); }
+.t tr.sub.comp + tr.sub td:nth-child(3), .t tr.sub.comp ~ tr.sub:not(.comp) td:nth-child(3) { padding-left: 22px; }

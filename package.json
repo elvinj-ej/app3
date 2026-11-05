@@ -1,7 +1,7 @@
 {
   "name": "onprem-transformation-planner",
   "private": true,
-  "version": "2.6.1",
+  "version": "2.7.0",
   "description": "On-prem virtualization footprint & application disposition planner",
   "type": "module",
   "scripts": {

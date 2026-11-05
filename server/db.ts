@@ -5,7 +5,7 @@ import type { AppPlan, AppRule, HistoryEntry, Inventory, PlanMap, Settings, Uplo
 
 export type SharedSettings = Omit<Settings, 'currentFY'>;
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export class Store {
   db: DatabaseSync;
@@ -72,7 +72,9 @@ export class Store {
     // Additive columns only – existing rows keep every value.
     const add: [string, string][] = ([['confidence', 'TEXT'], ['review_fy', 'INTEGER'], ['review_q', 'INTEGER']] as [string, string][]).filter(([c]) => !cols.includes(c));
     const hasRules = !!this.db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'app_rules'`).get();
-    if ((add.length || !hasRules) && this.existed) {
+    const ruleCols = hasRules ? (this.db.prepare(`PRAGMA table_info(app_rules)`).all() as { name: string }[]).map((c) => c.name) : [];
+    const needCompCol = hasRules && !ruleCols.includes('keep_components');
+    if ((add.length || !hasRules || needCompCol) && this.existed) {
       const dir = join(dirname(this.path), 'backups');
       mkdirSync(dir, { recursive: true });
       const dest = join(dir, `footprint-before-schema${SCHEMA_VERSION}-${new Date().toISOString().replace(/[:.]/g, '-')}.db`);
@@ -90,8 +92,10 @@ export class Store {
         note TEXT NOT NULL DEFAULT '',
         created_by TEXT NOT NULL,
         created_at TEXT NOT NULL,
+        keep_components INTEGER NOT NULL DEFAULT 0,
         UNIQUE(kind, source)
       )`);
+      if (needCompCol) this.db.exec(`ALTER TABLE app_rules ADD COLUMN keep_components INTEGER NOT NULL DEFAULT 0`);
       this.db.prepare(`INSERT INTO kv(key, value) VALUES('schema', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(String(SCHEMA_VERSION));
     });
   }
@@ -280,7 +284,7 @@ export class Store {
   listRules(): AppRule[] {
     const rows = this.db.prepare(`SELECT * FROM app_rules ORDER BY id`).all() as Record<string, unknown>[];
     return rows.map((r) => ({
-      id: Number(r.id), kind: r.kind as AppRule['kind'], source: String(r.source), target: String(r.target),
+      id: Number(r.id), kind: r.kind as AppRule['kind'], source: String(r.source), target: String(r.target), components: Number(r.keep_components ?? 0) === 1,
       note: String(r.note ?? ''), createdBy: String(r.created_by), createdAt: String(r.created_at),
     }));
   }
@@ -299,9 +303,9 @@ export class Store {
   addRule(rule: Omit<AppRule, 'id' | 'createdAt'>, opts: { keep?: 'target' | 'source'; discardSource?: boolean } = {}): AppRule {
     const now = new Date().toISOString();
     const res = this.db
-      .prepare(`INSERT INTO app_rules(kind, source, target, note, created_by, created_at) VALUES(?, ?, ?, ?, ?, ?)`)
-      .run(rule.kind, rule.source, rule.target, rule.note, rule.createdBy, now);
-    const label = rule.kind === 'merge' ? `Merged “${rule.source}” into this application` : `VM ${rule.source} assigned to this application`;
+      .prepare(`INSERT INTO app_rules(kind, source, target, note, created_by, created_at, keep_components) VALUES(?, ?, ?, ?, ?, ?, ?)`)
+      .run(rule.kind, rule.source, rule.target, rule.note, rule.createdBy, now, rule.kind === 'merge' && rule.components ? 1 : 0);
+    const label = rule.kind === 'merge' ? `Merged “${rule.source}” into this application${rule.components ? ' (kept as a component)' : ''}` : `VM ${rule.source} assigned to this application`;
     this.addHistory(rule.target, 'rule', null, { notes: `${label}${rule.note ? ` – ${rule.note}` : ''}` }, rule.createdBy, now);
     if (rule.kind === 'merge') {
       const src = this.getPlan(rule.source);
@@ -318,6 +322,14 @@ export class Store {
     return this.listRules().find((r) => r.id === Number(res.lastInsertRowid))!;
   }
 
+  setRuleComponents(id: number, on: boolean, user: string) {
+    const r = this.listRules().find((x) => x.id === id);
+    if (!r || r.kind !== 'merge') return;
+    this.db.prepare(`UPDATE app_rules SET keep_components = ? WHERE id = ?`).run(on ? 1 : 0, id);
+    this.addHistory(r.target, 'rule', null, { notes: `“${r.source}” ${on ? 'now shown as a component' : 'no longer shown as a component'}` }, user, new Date().toISOString());
+    this.bump();
+  }
+
   deleteRule(id: number, user: string) {
     const r = this.listRules().find((x) => x.id === id);
     if (!r) return;
@@ -330,6 +342,7 @@ export class Store {
   /** One-time setup of rules agreed with the owner; skipped if already applied once (even if later removed). */
   seedRules(key: string, rules: Omit<AppRule, 'id' | 'createdAt'>[]) {
     if (this.db.prepare(`SELECT value FROM kv WHERE key = ?`).get(key)) return 0;
+    if (this.existed && this.latestUploadId()) console.log(`  Backup before mapping setup: ${this.backup(key)}`);
     let n = 0;
     this.tx(() => {
       for (const r of rules) {
