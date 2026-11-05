@@ -2,13 +2,13 @@
 setlocal EnableDelayedExpansion
 REM ------------------------------------------------------------------
 REM  OnPrem Transformation Planner - start the server (release package)
-REM  Usage:  start.bat            (port 8080)
+REM  Usage:  start.bat            (port 9080)
 REM          start.bat 9000       (port 9000)
 REM  Data is stored in the "data" folder next to this file.
 REM ------------------------------------------------------------------
 cd /d "%~dp0"
 set "PORT=%~1"
-if "%PORT%"=="" set "PORT=8080"
+if "%PORT%"=="" set "PORT=9080"
 
 where node >nul 2>nul
 if errorlevel 1 (

@@ -20,7 +20,7 @@ const argVal = (name: string) => {
   return i >= 0 ? args[i + 1] : undefined;
 };
 const here = dirname(fileURLToPath(import.meta.url));
-const PORT = Number(argVal('port') ?? process.env.PORT ?? 8080);
+const PORT = Number(argVal('port') ?? process.env.PORT ?? 9080);
 const HOST = argVal('host') ?? process.env.HOST ?? '0.0.0.0';
 // Release package: server.mjs sits next to app/ and data/. Source checkout: use ./dist and ./data.
 const isRelease = existsSync(join(here, 'app', 'index.html'));

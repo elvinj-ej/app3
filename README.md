@@ -11,7 +11,7 @@ FY runs **1 July – 30 June** (FY27 = Jul 2026 – Jun 2027). Q1 = Jul–Sep, Q
 1. Install **Node.js 22.13+ or 24 LTS** on the server. This is the only prerequisite.
 2. Copy `OnPremTransformationPlanner-<version>.zip` to the server and unzip it. Build the zip with `npm run package`, or take it
    from a release.
-3. Run `start.bat` for port 8080, or `start.bat 9000` for another port. On Linux, run `./start.sh 9000`.
+3. Run `start.bat` for port 9080, or `start.bat 9000` for another port. On Linux, run `./start.sh 9000`.
 4. Everyone opens `http://<server>:<port>`.
 
 The package contains `server.mjs` (the API server with every library bundled in), `app/` (the web pages) and

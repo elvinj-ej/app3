@@ -4,11 +4,11 @@ REM ------------------------------------------------------------------
 REM  OnPrem Transformation Planner - run from a source checkout (needs internet once
 REM  for npm install). For servers without internet, use the release
 REM  package instead: "npm run package" -> release\OnPremTransformationPlanner-x.y.z.zip
-REM  Usage:  start.bat [port]      (default 8080)
+REM  Usage:  start.bat [port]      (default 9080)
 REM ------------------------------------------------------------------
 cd /d "%~dp0"
 set "PORT=%~1"
-if "%PORT%"=="" set "PORT=8080"
+if "%PORT%"=="" set "PORT=9080"
 
 where node >nul 2>nul
 if errorlevel 1 (

@@ -5,7 +5,7 @@ Self-contained package. Needs only Node.js (22.13+ or 24 LTS) on the server:
 no internet access, no "npm install", no GitHub.
 
 START
-  Windows:      double-click start.bat        (port 8080)
+  Windows:      double-click start.bat        (port 9080)
                 or: start.bat 9000            (any port)
   Linux/macOS:  ./start.sh 9000
 
@@ -31,9 +31,9 @@ UPGRADING
 
 RUN PERMANENTLY (Windows)
   Task Scheduler -> Create Task -> "Run whether user is logged on or not",
-  Trigger: At startup, Action: start.bat 8080, "Start in": this folder.
+  Trigger: At startup, Action: start.bat 9080, "Start in": this folder.
   Allow the port through Windows Firewall if prompted.
 
 OPTIONS
-  start.bat <port>                  port (default 8080)
-  node server.mjs --port 8080 --host 0.0.0.0 --db D:\footprint\footprint.db
+  start.bat <port>                  port (default 9080)
+  node server.mjs --port 9080 --host 0.0.0.0 --db D:\footprint\footprint.db
