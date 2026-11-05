@@ -117,3 +117,27 @@ export function addCharts(xlsx: Uint8Array, sheetName: string, charts: ChartDef[
 
   return zipSync(files, { level: 6 });
 }
+
+/** Print setup for extra sheets: landscape, fit to one page wide. */
+export function fitSheetsToWidth(xlsx: Uint8Array, sheetNames: string[]): Uint8Array {
+  const files = unzipSync(xlsx);
+  const read = (p: string) => strFromU8(files[p]);
+  const wb = read('xl/workbook.xml');
+  const wbRels = read('xl/_rels/workbook.xml.rels');
+  for (const name of sheetNames) {
+    const tag = [...wb.matchAll(/<sheet\b[^>]*>/g)].map((x) => x[0]).find((t) => t.includes(`name="${esc(name)}"`));
+    const rid = tag?.match(/r:id="([^"]+)"/)?.[1];
+    const target = rid && [...wbRels.matchAll(/<Relationship\b[^>]*>/g)].map((x) => x[0]).find((t) => t.includes(`Id="${rid}"`))?.match(/Target="([^"]+)"/)?.[1];
+    if (!target) continue;
+    const path = `xl/${target.replace(/^\/?xl\//, '')}`;
+    let sheet = read(path);
+    if (!/<sheetPr\b/.test(sheet)) sheet = sheet.replace(/(<worksheet\b[^>]*>)/, '$1<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>');
+    if (!/<pageSetup\b/.test(sheet)) {
+      const margins = /<pageMargins\b/.test(sheet) ? '' : '<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.3" footer="0.3"/>';
+      const anchor = /<\/mergeCells>/.test(sheet) ? '</mergeCells>' : '</sheetData>';
+      sheet = sheet.replace(anchor, `${anchor}${margins}<pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/>`);
+    }
+    files[path] = strToU8(sheet);
+  }
+  return zipSync(files, { level: 6 });
+}

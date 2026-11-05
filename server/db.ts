@@ -235,6 +235,33 @@ export class Store {
     }));
   }
 
+  hasFlag(key: string): boolean {
+    return !!this.db.prepare(`SELECT 1 FROM kv WHERE key = ?`).get(key);
+  }
+  setFlag(key: string) {
+    this.db.prepare(`INSERT INTO kv(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(key, new Date().toISOString());
+  }
+
+  /** Copy the database file to data/backups before a data-changing upgrade step. */
+  backup(tag: string): string {
+    const dir = join(dirname(this.path), 'backups');
+    mkdirSync(dir, { recursive: true });
+    const dest = join(dir, `footprint-before-${tag}-${new Date().toISOString().replace(/[:.]/g, '-')}.db`);
+    copyFileSync(this.path, dest);
+    return dest;
+  }
+
+  uploadIds(): number[] {
+    return (this.db.prepare(`SELECT id FROM uploads ORDER BY id`).all() as { id: number }[]).map((r) => Number(r.id));
+  }
+
+  /** Replace the stored (parsed) inventory of an upload – used to add newly supported columns from the original file. */
+  replaceInventory(id: number, inv: { vms: unknown[]; clusters: unknown[] }) {
+    this.db.prepare(`UPDATE uploads SET inventory_json = ? WHERE id = ?`).run(JSON.stringify({ vms: inv.vms, clusters: inv.clusters }), id);
+    this.db.prepare(`INSERT INTO kv(key, value) VALUES('inv_rev', '1') ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1`).run();
+    this.bump();
+  }
+
   /** Record a non-decision event (e.g. a settings change) in the Activity log. */
   logEvent(subject: string, text: string, user: string) {
     this.addHistory(subject, 'setting', null, { notes: text }, user, new Date().toISOString());
@@ -260,7 +287,8 @@ export class Store {
 
   rulesRev(): string {
     const r = this.db.prepare(`SELECT COUNT(*) AS n, COALESCE(MAX(id), 0) AS m FROM app_rules`).get() as { n: number; m: number };
-    return `${r.n}.${r.m}`;
+    const inv = this.db.prepare(`SELECT value FROM kv WHERE key = 'inv_rev'`).get() as { value: string } | undefined;
+    return `${r.n}.${r.m}.${inv?.value ?? 0}`;
   }
 
   /**

@@ -3,12 +3,13 @@ import { DISPOSITIONS, dispMeta } from '../src/lib/dispositions.ts';
 import { fyLabel, fyOf, fyQuarterEnd, parseISODate, quarterLabel, quarterRange } from '../src/lib/fy.ts';
 import { byDisposition, exitDate, vmExitDate, heldBySovereignty, exitsBy, footprintScenarios, groupApps, periods, planFor, scopeVMs, totals, trend, whatStays } from '../src/lib/projection.ts';
 import { CONFIDENCE, CONFIDENCE_LABEL, VENDOR_LABEL, deadlineVendor, moveWeight, vendorOf } from '../src/lib/defaults.ts';
-import { addCharts, type ChartDef } from './charts.ts';
+import { addCharts, fitSheetsToWidth, type ChartDef } from './charts.ts';
+import { buildTimeline, sumVcpu, sumVms, type TimelineEntry } from '../src/lib/timeline.ts';
 import { APP_NAME } from '../src/lib/brand.ts';
 import { parseApp } from '../src/lib/parse.ts';
 import type { AppRule, HistoryEntry, Inventory, PlanMap, Settings, UploadMeta } from '../src/lib/types.ts';
 
-type Cell = { value?: unknown; type?: unknown; format?: string; fontWeight?: 'bold'; fontSize?: number; backgroundColor?: string; color?: string; wrap?: boolean } | null;
+type Cell = { value?: unknown; type?: unknown; format?: string; fontWeight?: 'bold'; fontSize?: number; backgroundColor?: string; color?: string; wrap?: boolean; alignVertical?: 'top' | 'center' | 'bottom'; height?: number; columnSpan?: number } | null;
 type Row = Cell[];
 
 const H = (v: string): Cell => ({ value: v, fontWeight: 'bold', backgroundColor: '#1F4E79', color: '#FFFFFF' });
@@ -47,7 +48,7 @@ export async function buildTreatmentWorkbook(input: {
   const sov = settings.sovereignClusters ?? {};
   // All VMs (incl. powered-off), flagged when on a data-sovereignty cluster.
   const allVms = (inventory?.vms ?? []).map((v) => (sov[v.location] !== undefined ? { ...v, pinned: true } : v));
-  const vms = scopeVMs(allVms, settings);
+  const vms = scopeVMs(allVms, settings, plans);
   const apps = groupApps(allVms);
   const scopeNote = settings.includePoweredOff ? 'all VMs' : 'powered-on VMs only';
   const W8 = settings.confidenceWeights;
@@ -182,10 +183,11 @@ export async function buildTreatmentWorkbook(input: {
   const leaveCols = ['L', 'M', 'N', 'O', 'P'];
   const cdHeader = ['Period', `VMs remaining (${bName})`, `vCPU remaining (${bName})`, 'VMs % of today', 'vCPU % of today', '', 'FY', 'VMs remaining', 'vCPU remaining', '', 'Quarter',
     ...leaving.map((d) => `vCPU leaving – ${d.short}`), 'vCPU leaving – total', '', 'Treatment', 'vCPU', 'VMs', 'Apps', '', `vCPU – ${altName}`, 'vCPU – committed', `VMs – ${altName}`, 'VMs – committed'];
-  const nRows = Math.max(tq.length, tf.length, exitsC.length, DISPOSITIONS.length);
+  const MIX = DISPOSITIONS.filter((d) => d.group !== 'Excluded');
+  const nRows = Math.max(tq.length, tf.length, exitsC.length, MIX.length);
   const cdRows: Row[] = [];
   for (let r = 0; r < nRows; r++) {
-    const q = tq[r], f = tf[r], e = exitsC[r], dm = DISPOSITIONS[r];
+    const q = tq[r], f = tf[r], e = exitsC[r], dm = MIX[r];
     const ds = dm ? disp.find((x) => x.id === dm.id)! : null;
     cdRows.push([
       q ? S(q.label) : null, q ? N(q.vms) : null, q ? N(q.vcpu) : null, q ? N(q.vmsPct) : null, q ? N(q.vcpuPct) : null, null,
@@ -248,9 +250,13 @@ export async function buildTreatmentWorkbook(input: {
   }
   ex.push([]);
   ex.push([TH('Treatment'), TH('Apps'), TH('VMs'), TH('vCPU'), TH('% of vCPU')]);
-  for (const dm of DISPOSITIONS) {
+  for (const dm of MIX) {
     const x = disp.find((y) => y.id === dm.id)!;
     ex.push([C(dm.label), N(x.apps), N(x.vms), N(x.vcpu), { value: base.vcpu ? x.vcpu / base.vcpu : 0, type: Number, format: '0%' }]);
+  }
+  {
+    const vv = scopeVMs(allVms, settings).filter((v) => planFor(plans, v.appKey).disposition === 'virt_resource');
+    if (vv.length) ex.push([C('Virtualization resources (excluded from the footprint)', { color: '#7A7974' }), N(new Set(vv.map((v) => v.appKey)).size), N(vv.length), N(vv.reduce((x, v) => x + v.vcpu, 0)), null]);
   }
   ex.push([]);
   ex.push([TH('Domain'), TH('Apps'), TH('VMs'), TH('vCPU'), TH(`vCPU end ${fyLabel(settings.horizonFY)} (${isRisk ? 'risk-adj.' : 'full plan'})`)]);
@@ -315,11 +321,30 @@ export async function buildTreatmentWorkbook(input: {
       ], at: pos(3) },
     { type: 'column', title: `vCPU remaining at the end of each FY (${bName.toLowerCase()})`, catRef: rng('G', tf.length), categories: fCats,
       series: [{ name: 'vCPU', valRef: rng('I', tf.length), values: tf.map((p) => p.vcpu), color: COL.vcpu }], at: pos(4) },
-    { type: 'bar', title: "Today's vCPU by treatment", catRef: rng('S', DISPOSITIONS.length), categories: DISPOSITIONS.map((d) => d.label),
-      series: [{ name: 'vCPU', valRef: rng('T', DISPOSITIONS.length), values: DISPOSITIONS.map((d) => disp.find((x) => x.id === d.id)!.vcpu), color: '2A78D6' }], at: pos(5) },
+    { type: 'bar', title: "Today's vCPU by treatment", catRef: rng('S', MIX.length), categories: MIX.map((d) => d.label),
+      series: [{ name: 'vCPU', valRef: rng('T', MIX.length), values: MIX.map((d) => disp.find((x) => x.id === d.id)!.vcpu), color: '2A78D6' }], at: pos(5) },
   ];
 
-  const sheets = [execSheet, treatment, roadmap, byQuarter, vmSheet, changeLog, uploadSheet, chartData];
+  // ---------- Treatment timeline (treatment × FY matrix, like the dashboard) ----------
+  const tl = buildTimeline(allVms, plans, settings);
+  const cellText = (es: TimelineEntry[], withQ: boolean) =>
+    es.length ? `${es.map((e) => `${withQ && e.q ? `Q${e.q}  ` : ''}${e.name} – ${e.vms} VM${e.vms === 1 ? '' : 's'}${withQ && e.conf ? ` (${CONFIDENCE_LABEL[e.conf as keyof typeof CONFIDENCE_LABEL]})` : ''}`).join('\n')}\n\nTOTAL = ${sumVms(es)} VMs · ${Math.round(sumVcpu(es))} vCPU` : '–';
+  const tc = (v: string, extra: Partial<NonNullable<Cell>> = {}): Cell => ({ value: v, type: String, wrap: true, alignVertical: 'top', ...extra });
+  const tlRows: Row[] = [];
+  for (const d of DISPOSITIONS.filter((x) => x.leavesOnPrem)) {
+    const per = tl.move[d.id];
+    tlRows.push([tc(`${d.label}\n${per.reduce((x, es) => x + sumVms(es), 0)} VMs`, { fontWeight: 'bold', backgroundColor: '#F0EFEC' }), ...per.map((es) => tc(cellText(es, true)))]);
+  }
+  tlRows.push([tc('Leaving on-prem', { fontWeight: 'bold', backgroundColor: '#E4EFFC' }), ...tl.cols.map((_, i) => tc(`${DISPOSITIONS.filter((x) => x.leavesOnPrem).reduce((x, d) => x + sumVms(tl.move[d.id][i]), 0)} VMs`, { fontWeight: 'bold', backgroundColor: '#E4EFFC' }))]);
+  const spanRow = (label: string, es: TimelineEntry[], bg = '#F0EFEC'): Row => [tc(label, { fontWeight: 'bold', backgroundColor: bg }), tc(cellText(es, false), { columnSpan: tl.cols.length }), ...tl.cols.slice(1).map(() => null)];
+  tlRows.push(spanRow('Sovereignty-bound (stays on-prem)', tl.stay.retain_sovereignty ?? []));
+  tlRows.push(spanRow('Latency-bound (stays on-prem)', tl.stay.retain_latency ?? []));
+  tlRows.push(spanRow('Stay – Maintain', tl.stay.retain_maintain ?? []));
+  if (tl.virt.length) tlRows.push(spanRow('Virtualization resources (excluded)', tl.virt));
+  tlRows.push(spanRow('Not yet decided', tl.undecided));
+  const timelineSheet = sheet('Treatment timeline', ['Treatment', ...tl.cols], tlRows, [30, ...tl.cols.map(() => 34)]);
+
+  const sheets = [execSheet, timelineSheet, treatment, roadmap, byQuarter, vmSheet, changeLog, uploadSheet, chartData];
   if (input.rules?.length) {
     sheets.push(sheet('Mapping rules', ['Rule', 'From (VMInfo value)', 'Counted as', 'VMs affected', 'Note', 'Created by', 'Created'],
       input.rules.map((r) => {
@@ -335,5 +360,5 @@ export async function buildTreatmentWorkbook(input: {
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const raw = (await writeExcelFile(sheets as any).toBuffer()) as Buffer;
-  return Buffer.from(addCharts(new Uint8Array(raw), 'Executive Summary', charts));
+  return Buffer.from(fitSheetsToWidth(addCharts(new Uint8Array(raw), 'Executive Summary', charts), ['Treatment timeline']));
 }

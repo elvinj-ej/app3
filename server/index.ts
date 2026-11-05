@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import readExcelFile from 'read-excel-file/universal';
 import { Store, type SharedSettings } from './db.ts';
 import { buildTreatmentWorkbook } from './export.ts';
-import { inventoryFromSheets } from '../src/lib/parse.ts';
+import { inventoryFromSheets, parsedDomain, setDomainOverrides } from '../src/lib/parse.ts';
 import { defaultSettings } from '../src/lib/defaults.ts';
 import { DISPOSITIONS } from '../src/lib/dispositions.ts';
 import { fyOf } from '../src/lib/fy.ts';
@@ -45,6 +45,29 @@ const seeded = store.seedRules('seed_rules_2026_11', [
 ]);
 if (seeded) console.log(`  Added ${seeded} application mapping rules`);
 
+// v2.6 one-time setup agreed with the owner: two virtualization-platform applications and two domain corrections.
+if (!store.hasFlag('seed_v26')) {
+  const VIRT = ['Hosting_vSpere VMWare - Tier0 - ISD (Virtualization Services)', 'Hosting_HyperFlex - Tier0 - ISD (Compute Hosting Services)'];
+  const DOMAINS: Record<string, string> = {
+    'Nucleus - Tier1 - ISD (Web content management)': 'R&D',
+    'HP_Quality Center (CSV) - Tier3 - ISD (Application test mgmt.)': 'SCC',
+  };
+  if (store.existed) console.log(`  Backup before v2.6 setup: ${store.backup('v26-setup')}`);
+  store.tx(() => {
+    for (const k of VIRT) store.writePlan(k, { disposition: 'virt_resource' }, SEED_BY, 'update');
+    const cur = store.getSettings(sharedDefaults());
+    const overrides = { ...(cur.domainOverrides ?? {}) };
+    for (const [k, d] of Object.entries(DOMAINS)) {
+      if (overrides[k]) continue;
+      overrides[k] = d;
+      store.logEvent(k, `Domain set to ${d} (was ${parsedDomain(k)} in VMInfo)`, SEED_BY);
+    }
+    store.saveSettings({ ...cur, domainOverrides: overrides });
+    store.setFlag('seed_v26');
+  });
+  console.log('  Set 2 Virtualization Resource applications and 2 domain corrections');
+}
+
 /** Inventory as the app sees it: the uploaded file with mapping rules applied. */
 function mappedInventory(id: number): Inventory | null {
   const inv = store.getInventory(id);
@@ -58,7 +81,9 @@ function sharedDefaults(): SharedSettings {
   return rest;
 }
 function fullSettings(): Settings {
-  return { ...store.getSettings(sharedDefaults()), currentFY: fyOf(new Date()) };
+  const s = { ...store.getSettings(sharedDefaults()), currentFY: fyOf(new Date()) };
+  setDomainOverrides(s.domainOverrides);
+  return s;
 }
 function userOf(req: Request): string {
   const raw = req.header('x-user');
@@ -304,6 +329,20 @@ api.put('/settings', wrap((req, res) => {
     }
     next.sovereignClusters = nextSov;
   }
+  if (patch.domainOverrides && typeof patch.domainOverrides === 'object' && !Array.isArray(patch.domainOverrides)) {
+    const nextD: Record<string, string> = {};
+    for (const [k, v] of Object.entries(patch.domainOverrides as Record<string, unknown>).slice(0, 2000)) {
+      const d = String(v ?? '').trim().slice(0, 60);
+      if (d) nextD[String(k)] = d;
+    }
+    const before = cur.domainOverrides ?? {};
+    const user = userOf(req);
+    for (const k of new Set([...Object.keys(before), ...Object.keys(nextD)])) {
+      if (before[k] === nextD[k]) continue;
+      store.logEvent(k, nextD[k] ? `Domain set to ${nextD[k]} (VMInfo says ${parsedDomain(k)})` : `Domain override removed – back to ${parsedDomain(k)} from VMInfo`, user);
+    }
+    next.domainOverrides = nextD;
+  }
   if (patch.confidenceWeights && typeof patch.confidenceWeights === 'object') {
     const w = { ...cur.confidenceWeights };
     for (const k of ['high', 'medium', 'low', 'unknown', 'unrated'] as const) {
@@ -400,6 +439,41 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK'] as const) {
     process.exit(0);
   });
 }
+
+/** Earlier versions did not store the RVTools utilisation columns – re-read them from the stored original files once. */
+async function backfillUsage() {
+  if (store.hasFlag('backfill_usage_v26')) return;
+  const ids = store.uploadIds();
+  const todo = ids.filter((id) => {
+    const inv = store.getInventory(id);
+    return inv && inv.vms.length && inv.vms.every((v) => v.cpuAvgPct === undefined && v.memAvgPct === undefined);
+  });
+  if (todo.length) {
+    const dest = store.backup('usage-backfill');
+    let n = 0;
+    for (const id of todo) {
+      try {
+        const f = store.getUploadFile(id)!;
+        const sheets = (await readExcelFile(new Blob([new Uint8Array(f.file)]))) as unknown as { sheet: string; data: unknown[][] }[];
+        const fresh = inventoryFromSheets(sheets, f.filename);
+        const byName = new Map(fresh.vms.map((v) => [`${v.name}|${v.vcenter}`, v]));
+        const inv = store.getInventory(id)!;
+        // Only add the new columns; every other stored value stays exactly as it was.
+        const vms = inv.vms.map((v) => {
+          const fv = byName.get(`${v.name}|${v.vcenter}`);
+          return fv ? { ...v, cpuAvgPct: fv.cpuAvgPct, memAvgPct: fv.memAvgPct } : v;
+        });
+        store.replaceInventory(id, { vms, clusters: inv.clusters });
+        n++;
+      } catch (e) {
+        console.error(`  Could not read utilisation from upload #${id}:`, e instanceof Error ? e.message : e);
+      }
+    }
+    console.log(`  Added RVTools utilisation to ${n} earlier upload(s) – backup: ${dest}`);
+  }
+  store.setFlag('backfill_usage_v26');
+}
+backfillUsage().catch((e) => console.error(e));
 
 app.listen(PORT, HOST, () => {
   console.log('');

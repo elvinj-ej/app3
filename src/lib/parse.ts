@@ -3,6 +3,26 @@ import type { AppInfo, Cluster, Inventory, VM } from './types.ts';
 export const NO_APP = '(No application recorded)';
 
 const appCache = new Map<string, AppInfo>();
+let domainOverrides: Record<string, string> = {};
+
+/** Per-application domain corrections (Settings) – applied on top of the domain parsed from Application_Primary. */
+export function setDomainOverrides(m: Record<string, string> | undefined) {
+  const next = m ?? {};
+  if (JSON.stringify(next) === JSON.stringify(domainOverrides)) return;
+  domainOverrides = { ...next };
+  appCache.clear();
+}
+
+/** The domain as written in Application_Primary, ignoring overrides. */
+export function parsedDomain(key: string): string {
+  const o = domainOverrides;
+  domainOverrides = {};
+  appCache.delete(key);
+  const d = parseApp(key).domain;
+  appCache.delete(key);
+  domainOverrides = o;
+  return d;
+}
 const TIER_RE = /^(tier\s*(?:\d+|x|n\/a|unknown|legacy))(?![a-z0-9])/i;
 
 /**
@@ -36,6 +56,7 @@ export function parseApp(key: string): AppInfo {
       info = { key, name, tier, domain: domainRaw || 'Unclassified', service };
     }
   }
+  if (domainOverrides[key]) info = { ...info, domain: domainOverrides[key] };
   appCache.set(key, info);
   return info;
 }
@@ -61,6 +82,13 @@ function num(v: unknown): number {
   if (typeof v === 'number') return v;
   const n = parseFloat(str(v));
   return Number.isFinite(n) ? n : 0;
+}
+
+function optNum(v: unknown): number | undefined {
+  const s = str(v);
+  if (s === '') return undefined;
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : undefined;
 }
 
 function siteOf(vcenter: string): string {
@@ -119,6 +147,8 @@ export function inventoryFromSheets(sheets: SheetData[], sourceFile: string): In
       memGB: num(get(row, 'Memory Assigned (GB)')),
       storageProvGB: num(get(row, 'Storage Provisioned (GB)')),
       storageUsedGB: num(get(row, 'Storage Used (GB)')),
+      cpuAvgPct: optNum(get(row, 'CPU Usage Average %')),
+      memAvgPct: optNum(get(row, 'MEM Usage Average %')),
     });
   }
 

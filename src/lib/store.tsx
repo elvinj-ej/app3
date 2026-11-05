@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, ApiError, setApiUser } from './api';
+import { setDomainOverrides } from './parse';
 import { defaultSettings } from './defaults';
 import type { AppPlan, Inventory, PlanMap, Settings, UploadMeta } from './types';
 
@@ -66,7 +67,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [inventory, setInventory] = useState<Inventory | null>(null);
   const [latestUpload, setLatestUpload] = useState<UploadMeta | null>(null);
   const [plans, setPlansState] = useState<PlanMap>({});
-  const [settings, setSettings] = useState<Settings>(defaultSettings());
+  const [settings, setSettingsRaw] = useState<Settings>(defaultSettings());
+  // Domain overrides must be registered before anything renders with the new settings.
+  const setSettings = useCallback((v: Settings | ((s: Settings) => Settings)) => {
+    setSettingsRaw((prev) => {
+      const next = typeof v === 'function' ? (v as (s: Settings) => Settings)(prev) : v;
+      setDomainOverrides(next.domainOverrides);
+      return next;
+    });
+  }, []);
   const [rev, setRev] = useState(-1);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const invIdRef = useRef<string | null>(null);

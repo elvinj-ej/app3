@@ -3,11 +3,12 @@ import {
   Area, Bar, BarChart, CartesianGrid, ComposedChart, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import { useStore, vendorOf } from '../lib/store';
-import { DISP, DISPOSITIONS, dispMeta } from '../lib/dispositions';
-import { daysUntil, fmtDate, fyEnd, fyLabel, fyOf, fyQuarterOf, humanCountdown, parseISODate, quarterLabel, quarterRange } from '../lib/fy';
+import { DISP, DISPOSITIONS } from '../lib/dispositions';
+import { daysUntil, fmtDate, fyEnd, fyLabel, fyOf, fyQuarterOf, humanCountdown, parseISODate, quarterLabel } from '../lib/fy';
 import { byDisposition, vmExitDate, exitsBy, footprintScenarios, groupApps, planFor, scopeVMs, totals, trend, whatStays, type Granularity, type Scenarios, type TrendPoint } from '../lib/projection';
 import { CONFIDENCE, VENDOR_LABEL, deadlineShort, deadlineVendor } from '../lib/defaults';
 import { parseApp } from '../lib/parse';
+import { buildTimeline, type TimelineEntry } from '../lib/timeline';
 import { fmt, useColors } from '../lib/useColors';
 import type { Deadline } from '../lib/types';
 
@@ -35,7 +36,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
   const isRisk = basis === 'risk';
   const bLabel = isRisk ? 'risk-adjusted' : 'full plan';
 
-  const vms = useMemo(() => scopeVMs(inventory.vms, settings), [inventory, settings]);
+  const vms = useMemo(() => scopeVMs(inventory.vms, settings, plans), [inventory, settings, plans]);
   const base = useMemo(() => totals(vms), [vms]);
   const points = useMemo<ViewPoint[]>(() => trend(vms, plans, settings, gran).map((p) => toView(p, basis)), [vms, plans, settings, gran, basis]);
   const exits = useMemo(() => exitsBy(vms, plans, settings, exitMetric, gran, isRisk), [vms, plans, settings, exitMetric, gran, isRisk]);
@@ -128,30 +129,9 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
       </div>
 
       {/* KPIs */}
-      <div className="grid g-kpi" style={{ marginBottom: 16 }}>
-        <div className="card kpi">
-          <div className="k-label">VMs on-prem today</div>
-          <div className="k-value num">{fmt(base.vms)}</div>
-          <div className="k-foot">{fmt(base.memGB / 1024)} TB vRAM assigned</div>
-        </div>
-        <div className="card kpi">
-          <div className="k-label">vCPU on-prem today</div>
-          <div className="k-value num">{fmt(base.vcpu)}</div>
-          <div className="k-foot">Primary licensing driver</div>
-        </div>
-        <div className="card kpi">
-          <div className="k-label">Projected at end of {fyLabel(settings.horizonFY)} · {bLabel}</div>
-          <div className="k-value num">
-            {fmt(endPt.vcpu)}<small>vCPU</small>
-          </div>
-          <div className="k-foot">
-            {fmt(endPt.vms)} VMs ·{' '}
-            <span className="delta-down">−{fmt(100 - endPt.vcpuPct)}% vCPU</span>
-          </div>
-          <div className="k-foot" title="Full plan = every scheduled move happens on its target quarter. Committed = only High-confidence moves happen.">
-            {isRisk ? `Full plan ${fmt(endPt.vcpuPlan)}` : `Risk-adjusted ${fmt(endPt.vcpuRisk)}`} · committed {fmt(endPt.vcpuCommit)}
-          </div>
-        </div>
+      <div className="grid g-kpi kpi-2rows" style={{ marginBottom: 16 }}>
+        <VmCountCard />
+        <ResourcesCard vms={vms} />
         <div className="card kpi">
           <div className="k-label">Applications with a decision</div>
           <div className="k-value num">
@@ -164,6 +144,19 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
             })}
           </div>
           <div className="k-foot">{Math.round((decidedVcpu / (base.vcpu || 1)) * 100)}% of vCPU has a disposition</div>
+        </div>
+        <div className="card kpi kpi-span2">
+          <div className="k-label">Projected at end of {fyLabel(settings.horizonFY)} · {bLabel}</div>
+          <div className="k-value num">
+            {fmt(endPt.vcpu)}<small>vCPU</small>
+          </div>
+          <div className="k-foot">
+            {fmt(endPt.vms)} VMs ·{' '}
+            <span className="delta-down">−{fmt(100 - endPt.vcpuPct)}% vCPU</span>
+          </div>
+          <div className="k-foot" title="Full plan = every scheduled move happens on its target quarter. Committed = only High-confidence moves happen.">
+            {isRisk ? `Full plan ${fmt(endPt.vcpuPlan)}` : `Risk-adjusted ${fmt(endPt.vcpuRisk)}`} · committed {fmt(endPt.vcpuCommit)}
+          </div>
         </div>
         <div className="card kpi">
           <div className="k-label">Confidence of scheduled moves</div>
@@ -363,7 +356,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
             </div>
           </div>
           <div className="bar-list">
-            {DISPOSITIONS.map((d) => {
+            {DISPOSITIONS.filter((d) => d.group !== 'Excluded').map((d) => {
               const s = disp.find((x) => x.id === d.id)!;
               const max = Math.max(...disp.map((x) => x.vcpu), 1);
               return (
@@ -397,7 +390,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
 
       <WhatStaysCard basis={basis} />
 
-      <UpcomingMoves />
+      <TreatmentMatrix />
 
       <div className="grid g-2">
         <DomainTable basis={basis} />
@@ -449,7 +442,7 @@ function ExitTip({ active, payload, label, metric }: { active?: boolean; payload
 
 function DomainTable({ basis }: { basis: Basis }) {
   const { inventory, plans, settings } = useStore();
-  const vms = scopeVMs(inventory.vms, settings);
+  const vms = scopeVMs(inventory.vms, settings, plans);
   const end = fyEnd(settings.horizonFY);
   const rows = useMemo(() => {
     const m = new Map<string, { domain: string; apps: Set<string>; vms: number; vcpu: number; decided: number; endVcpu: number }>();
@@ -554,65 +547,6 @@ function QuarterTick(props: { x?: number; y?: number; payload?: { value: string;
   );
 }
 
-function UpcomingMoves() {
-  const { inventory, plans, settings } = useStore();
-  const vms = scopeVMs(inventory.vms, settings);
-  const rows = useMemo(() => {
-    return groupApps(vms)
-      .map((a) => ({ a, p: planFor(plans, a.key) }))
-      .filter(({ p }) => dispMeta(p.disposition).leavesOnPrem && p.targetFY)
-      .sort((x, y) => x.p.targetFY! * 10 + (x.p.targetQ ?? 4) - (y.p.targetFY! * 10 + (y.p.targetQ ?? 4)) || y.a.vcpu - x.a.vcpu);
-  }, [vms, plans]);
-  const [all, setAll] = useState(false);
-  const shown = all ? rows : rows.slice(0, 12);
-  return (
-    <div className="card card-pad" style={{ marginBottom: 16 }}>
-      <div className="card-head">
-        <div><h2>Treatment timeline</h2><p className="sub">Scheduled applications in the order they leave on-prem ({rows.length} scheduled)</p></div>
-        <a className="btn btn-sm" href="#/planner">Open planner</a>
-      </div>
-      {rows.length === 0 ? <div className="note">No applications scheduled yet.</div> : (
-        <div className="table-wrap" style={{ borderTop: 0 }}>
-          <table className="t">
-            <thead><tr><th>Quarter</th><th>Application</th><th>Domain</th><th>Treatment</th><th>Confidence</th><th className="r">VMs</th><th className="r">vCPU</th><th>Notes</th></tr></thead>
-            <tbody>
-              {shown.map(({ a, p }) => (
-                <tr key={a.key}>
-                  <td style={{ whiteSpace: 'nowrap' }}><b>{quarterLabel(p.targetFY!, p.targetQ ?? 4)}</b> <span className="muted">· {quarterRange(p.targetFY!, p.targetQ ?? 4)}</span></td>
-                  <td><span className="app-name">{a.name}</span></td>
-                  <td>{a.domain}</td>
-                  <td><span className="chip"><i className="dot" style={{ background: dispMeta(p.disposition).color }} />{dispMeta(p.disposition).short}</span></td>
-                  <td><ConfChip c={p.confidence} /></td>
-                  <td className="r num">{a.vmCount}</td>
-                  <td className="r num">{fmt(a.vcpu)}</td>
-                  <td className="muted">{p.notes}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {rows.length > 12 && <button className="btn btn-sm" style={{ marginTop: 10 }} onClick={() => setAll(!all)}>{all ? 'Show fewer' : `Show all ${rows.length}`}</button>}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** Lay the page out at A4-landscape width, let the charts re-measure, then open the print dialog. */
-export function printSummary() {
-  const html = document.documentElement;
-  const prevTheme = html.getAttribute('data-theme');
-  html.setAttribute('data-theme', 'light');
-  html.classList.add('printing');
-  const done = () => {
-    html.classList.remove('printing');
-    if (prevTheme) html.setAttribute('data-theme', prevTheme);
-    else html.removeAttribute('data-theme');
-    window.removeEventListener('afterprint', done);
-  };
-  window.addEventListener('afterprint', done);
-  setTimeout(() => window.print(), 900);
-}
-
 function DeadlineNumbers({ sc, today, scope, basis }: { sc: Scenarios; today: { vcpu: number; vms: number }; scope: string; basis: Basis }) {
   const head = basis === 'risk' ? sc.risk : sc.plan;
   return (
@@ -625,11 +559,6 @@ function DeadlineNumbers({ sc, today, scope, basis }: { sc: Scenarios; today: { 
   );
 }
 
-function ConfChip({ c }: { c?: string }) {
-  const m = CONFIDENCE.find((x) => x.id === c);
-  if (!m) return <span className="chip" style={{ borderStyle: 'dashed' }}>Not rated</span>;
-  return <span className="chip"><i className="dot" style={{ background: m.color }} />{m.label}</span>;
-}
 
 type Basis = 'risk' | 'plan';
 type ViewPoint = TrendPoint & { basis: Basis; vmsRisk: number; vcpuRisk: number; altVms: number; altVcpu: number };
@@ -643,7 +572,7 @@ function toView(p: TrendPoint, basis: Basis): ViewPoint {
 
 function WhatStaysCard({ basis }: { basis: Basis }) {
   const { inventory, plans, settings } = useStore();
-  const vms = scopeVMs(inventory.vms, settings);
+  const vms = scopeVMs(inventory.vms, settings, plans);
   const rows = useMemo(() => whatStays(vms, plans, settings, basis).filter((r) => (basis === 'risk' || r.id !== 'risk') && (r.id !== 'pinned' || Object.keys(settings.sovereignClusters ?? {}).length > 0)), [vms, plans, settings, basis]);
   const total = rows.reduce((a, r) => a + r.vcpu, 0);
   const totalVms = rows.reduce((a, r) => a + r.vms, 0);
@@ -671,3 +600,166 @@ function WhatStaysCard({ basis }: { basis: Basis }) {
     </div>
   );
 }
+
+function VmCountCard() {
+  const { inventory, plans, settings } = useStore();
+  const all = inventory.vms;
+  const on = all.filter((v) => v.poweredOn).length;
+  const virt = all.filter((v) => planFor(plans, v.appKey).disposition === 'virt_resource').length;
+  const planned = scopeVMs(all, settings, plans).length;
+  return (
+    <div className="card kpi">
+      <div className="k-label">VMs on-prem today</div>
+      <div className="k-value num">{fmt(all.length)}<small>total VMs</small></div>
+      <div className="k-foot">{fmt(on)} powered on · {fmt(all.length - on)} powered off</div>
+      <div className="k-foot">{fmt(planned)} in the plan{virt ? ` · ${fmt(virt)} virtualization resources excluded` : ''}</div>
+    </div>
+  );
+}
+
+function ResourcesCard({ vms }: { vms: { vcpu: number; memGB: number; storageProvGB: number; storageUsedGB: number; cpuAvgPct?: number; memAvgPct?: number }[] }) {
+  const { inventory, plans } = useStore();
+  let vcpu = 0, vcpuUsed = 0, mem = 0, memUsed = 0, sp = 0, su = 0, haveUse = 0;
+  // Storage: every VM incl. powered-off (they still occupy disk); virtualization resources excluded.
+  for (const v of inventory.vms) {
+    if (planFor(plans, v.appKey).disposition === 'virt_resource') continue;
+    sp += v.storageProvGB; su += v.storageUsedGB;
+  }
+  // vCPU / vRAM: VMs in the footprint (powered-on unless the setting includes powered-off).
+  for (const v of vms) {
+    vcpu += v.vcpu; mem += v.memGB;
+    if (v.cpuAvgPct !== undefined || v.memAvgPct !== undefined) haveUse++;
+    vcpuUsed += (v.vcpu * (v.cpuAvgPct ?? 0)) / 100;
+    memUsed += (v.memGB * (v.memAvgPct ?? 0)) / 100;
+  }
+  const tb = (gb: number) => (gb >= 1024 ? `${(gb / 1024).toLocaleString('en-AU', { maximumFractionDigits: 1 })} TB` : `${fmt(gb)} GB`);
+  const rows = [
+    { k: 'vCPU', a: fmt(vcpu), u: fmt(vcpuUsed), pct: vcpu ? vcpuUsed / vcpu : 0, help: '24-hour average CPU usage % (RVTools) × vCPU assigned – powered-on VMs' },
+    { k: 'vRAM', a: tb(mem), u: tb(memUsed), pct: mem ? memUsed / mem : 0, help: '24-hour average memory usage % (RVTools) × vRAM assigned – powered-on VMs' },
+    { k: 'Storage', a: tb(sp), u: tb(su), pct: sp ? su / sp : 0, help: 'Storage Provisioned vs. Storage Used from RVTools – all VMs incl. powered-off' },
+  ];
+  return (
+    <div className="card kpi kpi-wide">
+      <div className="k-label">Resources assigned vs. used</div>
+      <div className="res-rows">
+        {rows.map((r) => (
+          <div className="res-row" key={r.k} title={r.help}>
+            <span className="res-k">{r.k}</span>
+            <span className="res-v num"><b>{r.a}</b> assigned</span>
+            <span className="res-bar"><span style={{ width: `${Math.min(100, r.pct * 100)}%` }} /></span>
+            <span className="res-u num">{r.u} used · {Math.round(r.pct * 100)}%</span>
+          </div>
+        ))}
+      </div>
+      <div className="k-foot">{haveUse ? 'Used = 24-hour average utilisation % from the RVTools report × assigned (vCPU, vRAM; powered-on VMs). Storage used as reported, all VMs.' : 'Utilisation not available in this upload'}</div>
+    </div>
+  );
+}
+
+type MEntry = TimelineEntry;
+
+function TreatmentMatrix() {
+  const { inventory, plans, settings } = useStore();
+  const [open, setOpen] = useState<Set<string>>(new Set());
+
+  const model = useMemo(() => buildTimeline(inventory.vms, plans, settings), [inventory, plans, settings]);
+  const cols = model.cols;
+
+  const sum = (es: MEntry[]) => es.reduce((x, e) => x + e.vms, 0);
+  const List = ({ id, es, max = 8, showQ = true }: { id: string; es: MEntry[]; max?: number; showQ?: boolean }) => {
+    const sorted = [...es].sort((a, b) => b.vms - a.vms || a.name.localeCompare(b.name));
+    const isOpen = open.has(id);
+    const shown = isOpen ? sorted : sorted.slice(0, max);
+    if (!es.length) return <span className="muted">–</span>;
+    return (
+      <>
+        <ul className="mx-list">
+          {shown.map((e) => {
+            const c = CONFIDENCE.find((x) => x.id === e.conf);
+            return (
+              <li key={e.key} title={`${e.name} – ${e.vms} VMs, ${fmt(e.vcpu)} vCPU${c ? ` · ${c.label} confidence` : ''}`}>
+                {showQ && e.q ? <span className="mx-q">Q{e.q}</span> : null}
+                <span className="mx-name">{e.name} – {e.vms} VM{e.vms === 1 ? '' : 's'}</span>
+                {showQ && <i className="dot mx-conf" style={c ? { background: c.color } : { border: '1px dashed var(--border-strong)' }} />}
+              </li>
+            );
+          })}
+        </ul>
+        {sorted.length > max && (
+          <button className="btn btn-sm mx-more" onClick={() => setOpen((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; })}>
+            {isOpen ? 'Show fewer' : `+ ${sorted.length - max} more (${sum(sorted.slice(max))} VMs)`}
+          </button>
+        )}
+        <div className="mx-total">TOTAL = {fmt(sum(es))} VMs · {fmt(es.reduce((x, e) => x + e.vcpu, 0))} vCPU</div>
+      </>
+    );
+  };
+
+  const moveRows = DISPOSITIONS.filter((d) => d.leavesOnPrem);
+  const stayRows = DISPOSITIONS.filter((d) => d.group === 'Retain');
+  const colTotals = cols.map((_, i) => moveRows.reduce((x, d) => x + sum(model.move[d.id][i]), 0));
+
+  return (
+    <div className="card card-pad" style={{ marginBottom: 16 }}>
+      <div className="card-head">
+        <div>
+          <h2>Treatment timeline by financial year</h2>
+          <p className="sub">Applications by treatment and the FY they leave on-prem (Q = target quarter, dot = confidence). VM counts exclude VMs pinned by data sovereignty, which are listed under Sovereignty-bound.</p>
+        </div>
+        <a className="btn btn-sm" href="#/planner">Open planner</a>
+      </div>
+      <div className="table-wrap" style={{ borderTop: 0 }}>
+        <table className="mx">
+          <thead>
+            <tr><th className="mx-rowh">Treatment</th>{cols.map((c) => <th key={c}>{c}</th>)}</tr>
+          </thead>
+          <tbody>
+            {moveRows.map((d) => (
+              <tr key={d.id}>
+                <th className="mx-rowh" style={{ borderLeftColor: d.color }}>{d.label}<div className="mx-rowsum">{fmt(model.move[d.id].reduce((x, es) => x + sum(es), 0))} VMs</div></th>
+                {model.move[d.id].map((es, i) => <td key={i}><List id={`${d.id}:${i}`} es={es} /></td>)}
+              </tr>
+            ))}
+            <tr className="mx-foot">
+              <th className="mx-rowh">Leaving on-prem</th>
+              {colTotals.map((t, i) => <td key={i}><b className="num">{fmt(t)}</b> VMs</td>)}
+            </tr>
+            {stayRows.map((d) => (
+              <tr key={d.id}>
+                <th className="mx-rowh" style={{ borderLeftColor: d.color }}>{d.id === 'retain_latency' ? 'Latency-bound' : d.id === 'retain_sovereignty' ? 'Sovereignty-bound' : 'Stay – Maintain'}<div className="mx-rowsum">stays on-prem</div></th>
+                <td colSpan={cols.length}><div className="mx-span"><List id={d.id} es={model.stay[d.id] ?? []} max={12} showQ={false} /></div></td>
+              </tr>
+            ))}
+            {model.virt.length > 0 && (
+              <tr className="mx-excluded">
+                <th className="mx-rowh">Virtualization resources<div className="mx-rowsum">excluded from the footprint</div></th>
+                <td colSpan={cols.length}><div className="mx-span"><List id="virt" es={model.virt} max={12} showQ={false} /></div></td>
+              </tr>
+            )}
+            <tr>
+              <th className="mx-rowh" style={{ borderLeftColor: 'var(--s-tbd)' }}>Not yet decided</th>
+              <td colSpan={cols.length}><div className="mx-span"><List id="tbd" es={model.undecided} max={10} showQ={false} /></div></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/** Lay the page out at A4-landscape width, let the charts re-measure, then open the print dialog. */
+export function printSummary() {
+  const html = document.documentElement;
+  const prevTheme = html.getAttribute('data-theme');
+  html.setAttribute('data-theme', 'light');
+  html.classList.add('printing');
+  const done = () => {
+    html.classList.remove('printing');
+    if (prevTheme) html.setAttribute('data-theme', prevTheme);
+    else html.removeAttribute('data-theme');
+    window.removeEventListener('afterprint', done);
+  };
+  window.addEventListener('afterprint', done);
+  setTimeout(() => window.print(), 900);
+}
+

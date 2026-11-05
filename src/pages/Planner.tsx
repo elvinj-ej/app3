@@ -3,7 +3,7 @@ import { useStore } from '../lib/store';
 import { DISPOSITIONS, dispMeta } from '../lib/dispositions';
 import { fyLabel, fyOf, fyQuarterOf, quarterLabel, quarterRange } from '../lib/fy';
 import { groupApps, heldBySovereignty, planFor, scopeVMs, type AppRow } from '../lib/projection';
-import { parseApp, TIER_ORDER } from '../lib/parse';
+import { parseApp, parsedDomain, TIER_ORDER } from '../lib/parse';
 import { fmt } from '../lib/useColors';
 import type { AppPlan, Confidence, ConfidenceWeights, Disposition, Quarter, VM } from '../lib/types';
 import { CONFIDENCE, CONFIDENCE_LABEL } from '../lib/defaults';
@@ -291,7 +291,7 @@ export default function Planner() {
                           )}
                           {a.vms.some((v) => v.origAppKey) && <div className="muted" style={{ fontSize: 11 }} title={[...new Set(a.vms.filter((v) => v.origAppKey).map((v) => v.origAppKey))].join('\n')}>↪ includes {a.vms.filter((v) => v.origAppKey).length} VMs merged by mapping rules</div>}
                         </td>
-                        <td>{a.domain}</td>
+                        <td><DomainPicker appKey={a.key} domain={a.domain} options={domains} /></td>
                         <td className="muted">{a.tier}</td>
                         <td className="r num">{a.vmCount}</td>
                         <td className="r num"><b>{fmt(a.vcpu)}</b>{heldVcpu > 0 && <div className="muted" style={{ fontSize: 11, fontWeight: 400 }} title="vCPU that can actually leave on-prem">{fmt(a.vcpu - heldVcpu)} can move</div>}</td>
@@ -451,7 +451,7 @@ function TargetPicker({ plan, options, onChange }: { plan: AppPlan; options: { f
       </div>
     );
   }
-  if (!meta.leavesOnPrem) return <span className="muted">—</span>;
+  if (!meta.leavesOnPrem) return <span className="muted">{meta.group === 'Excluded' ? 'Excluded from the footprint' : '—'}</span>;
   const v = tKey(plan.targetFY, plan.targetQ);
   return (
     <div style={!plan.targetFY ? { outline: '1px solid var(--warn-ink)', borderRadius: 6, display: 'inline-block' } : undefined}>
@@ -487,6 +487,29 @@ function PinFlag({ reason, cluster, retire }: { reason?: string; cluster: string
     <div className="pin-flag">
       🔒 {retire ? 'On a data-sovereignty cluster – Retire still applies' : 'Pinned on-prem – data sovereignty'}
       {reason ? ` (${reason})` : ''} · cluster {cluster} · <a href="#/settings">set in Settings</a>
+    </div>
+  );
+}
+
+function DomainPicker({ appKey, domain, options }: { appKey: string; domain: string; options: string[] }) {
+  const { settings, updateSettings } = useStore();
+  const overridden = !!settings.domainOverrides?.[appKey];
+  const original = parsedDomain(appKey);
+  const opts = [...new Set([...options, original, domain, 'ISD', 'SCC', 'R&D', 'Data', 'Facility', 'Security'])].filter((d) => d && d !== 'Unclassified').sort();
+  return (
+    <div title={overridden ? `Corrected in this app – VMInfo says ${original}` : 'Domain from Application_Primary – change to correct it'}>
+      <select className="select select-sm" value={domain} aria-label="Application domain"
+        onChange={(e) => {
+          const v = e.target.value;
+          const next = { ...(settings.domainOverrides ?? {}) };
+          if (v === original) delete next[appKey];
+          else next[appKey] = v;
+          updateSettings({ domainOverrides: next });
+        }}>
+        {!opts.includes(domain) && <option value={domain}>{domain}</option>}
+        {opts.map((d) => <option key={d} value={d}>{d}</option>)}
+      </select>
+      {overridden && <div className="muted" style={{ fontSize: 11 }}>✎ corrected (VMInfo: {original})</div>}
     </div>
   );
 }

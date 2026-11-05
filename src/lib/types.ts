@@ -14,6 +14,9 @@ export interface VM {
   memGB: number;
   storageProvGB: number;
   storageUsedGB: number;
+  /** Average utilisation % from VMInfo (CPU Usage Average %, MEM Usage Average %); undefined if not in the file. */
+  cpuAvgPct?: number;
+  memAvgPct?: number;
   /** Set when a mapping rule moved this VM to a different application (the value from the VMInfo file). */
   origAppKey?: string;
   /** Set by scopeVMs: the VM sits on a cluster flagged for data sovereignty. */
@@ -85,7 +88,8 @@ export type Disposition =
   | 'rehost_aws'
   | 'retain_sovereignty'
   | 'retain_latency'
-  | 'retain_maintain';
+  | 'retain_maintain'
+  | 'virt_resource';
 
 export type Quarter = 1 | 2 | 3 | 4;
 
@@ -133,6 +137,8 @@ export interface Settings {
   confidenceWeights: ConfidenceWeights;
   /** Clusters whose VMs must stay on-prem for data sovereignty → reason. */
   sovereignClusters: Record<string, string>;
+  /** Application_Primary → corrected domain. */
+  domainOverrides: Record<string, string>;
 }
 
 export interface AppInfo {

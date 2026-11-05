@@ -23,8 +23,10 @@ export function exitDate(plan: AppPlan): Date | null {
 export const MIGRATING = new Set<Disposition>(['saas', 'modernize_aws', 'modernize_azure', 'rehost_aws']);
 
 /** VMs in scope for the footprint, flagged `pinned` when their cluster is marked for data sovereignty. */
-export function scopeVMs(vms: VM[], settings: Settings): VM[] {
-  const inScope = settings.includePoweredOff ? vms : vms.filter((v) => v.poweredOn);
+export function scopeVMs(vms: VM[], settings: Settings, plans?: PlanMap): VM[] {
+  let inScope = settings.includePoweredOff ? vms : vms.filter((v) => v.poweredOn);
+  // With plans given: drop Virtualization Resource VMs (the platform itself is not part of the on-prem footprint).
+  if (plans) inScope = inScope.filter((v) => planFor(plans, v.appKey).disposition !== 'virt_resource');
   const sov = settings.sovereignClusters ?? {};
   if (!Object.keys(sov).length) return inScope;
   return inScope.map((v) => (sov[v.location] !== undefined ? { ...v, pinned: true } : v));

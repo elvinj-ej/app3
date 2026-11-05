@@ -36,6 +36,20 @@ who changed it last); Quarterly roadmap (apps, VMs and vCPU leaving and remainin
 Apps by quarter; VMs; Change log; Inventory uploads; Chart data; and Unmatched decisions.
 The dashboard also has a **Print / Save as PDF** button that lays the executive summary out on A4 landscape pages.
 
+### Executive Summary additions (v2.6)
+
+- **Treatment timeline**: a matrix of treatment × financial year. Each cell lists the applications with their VM
+  counts, target quarter and confidence, plus a TOTAL. Stay On-Prem rows span all years, and Sovereignty-bound includes
+  the clusters pinned for data sovereignty. The same matrix is in the Excel *Treatment timeline* sheet.
+- **VMs on-prem today**: total VMs, powered on and off, and how many are in the plan.
+- **Resources assigned vs. used**: vCPU and vRAM used = the 24-hour average utilisation % from the RVTools report ×
+  assigned, for powered-on VMs. Storage provisioned vs. used is for all VMs, including powered-off ones.
+
+**Virtualization Resource** is a treatment for the virtualization platform itself (for example vCenter, VMware or
+HyperFlex management). Those VMs are left out of the footprint, the forecast and every chart, and are listed greyed for
+reference. **Domain corrections**: click the Domain cell in the planner to override the domain parsed from
+Application_Primary. Corrections are kept across uploads and logged in Activity.
+
 ### Confidence and the risk-adjusted forecast
 
 For each application that leaves on-prem, the planner records a **confidence**: High, Medium, Low or Unknown. It is

@@ -4,7 +4,7 @@ export interface DispositionMeta {
   id: Disposition;
   label: string;
   short: string;
-  group: 'Exit' | 'Cloud' | 'Retain' | 'Undecided';
+  group: 'Exit' | 'Cloud' | 'Retain' | 'Undecided' | 'Excluded';
   leavesOnPrem: boolean;
   /** CSS variable holding the series colour (fixed per disposition, never by rank). */
   color: string;
@@ -21,6 +21,7 @@ export const DISPOSITIONS: DispositionMeta[] = [
   { id: 'retain_sovereignty', label: 'Stay On-Prem – Data Sovereignty', short: 'On-Prem (Sovereignty)', group: 'Retain', leavesOnPrem: false, color: 'var(--s6)', help: 'Must remain on-prem: data residency / sovereignty' },
   { id: 'retain_latency', label: 'Stay On-Prem – Latency', short: 'On-Prem (Latency)', group: 'Retain', leavesOnPrem: false, color: 'var(--s7)', help: 'Must remain on-prem: latency-bound (e.g. manufacturing, OT)' },
   { id: 'retain_maintain', label: 'Stay On-Prem – Maintain', short: 'On-Prem (Maintain)', group: 'Retain', leavesOnPrem: false, color: 'var(--s8)', help: 'Keep on-prem – no migration planned; not sovereignty- or latency-bound' },
+  { id: 'virt_resource', label: 'Virtualization Resource', short: 'Virtualization', group: 'Excluded', leavesOnPrem: false, color: 'var(--s-tbd)', help: 'Virtualization platform itself (vCenter, VMware/HyperFlex management) – excluded from the on-prem footprint and forecast' },
   { id: 'tbd', label: 'Not yet decided', short: 'Undecided', group: 'Undecided', leavesOnPrem: false, color: 'var(--s-tbd)', help: 'No disposition captured yet' },
 ];
 

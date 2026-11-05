@@ -58,5 +58,5 @@ export function vendorOf(settings: Pick<Settings, 'clusterVendor'>, cluster: str
 
 export function defaultSettings(today = new Date()): Settings {
   const fy = fyOf(today);
-  return { currentFY: fy, horizonFY: fy + 5, includePoweredOff: false, deadlines: DEFAULT_DEADLINES, clusterVendor: {}, confidenceWeights: { ...DEFAULT_WEIGHTS }, sovereignClusters: {} };
+  return { currentFY: fy, horizonFY: fy + 5, includePoweredOff: false, deadlines: DEFAULT_DEADLINES, clusterVendor: {}, confidenceWeights: { ...DEFAULT_WEIGHTS }, sovereignClusters: {}, domainOverrides: {} };
 }
