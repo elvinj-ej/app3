@@ -61,7 +61,9 @@ class HttpError extends Error {
   }
 }
 
-function cleanPlan(input: Partial<AppPlan>): Pick<AppPlan, 'disposition' | 'targetFY' | 'targetQ' | 'notes'> {
+const VALID_CONF = new Set(['high', 'medium', 'low', 'unknown']);
+
+function cleanPlan(input: Partial<AppPlan>): Pick<AppPlan, 'disposition' | 'targetFY' | 'targetQ' | 'notes' | 'confidence'> {
   const disposition = (input.disposition ?? 'tbd') as Disposition;
   if (!VALID_DISP.has(disposition)) throw new HttpError(400, `Unknown disposition: ${disposition}`);
   let targetFY: number | undefined = input.targetFY == null ? undefined : Number(input.targetFY);
@@ -74,7 +76,10 @@ function cleanPlan(input: Partial<AppPlan>): Pick<AppPlan, 'disposition' | 'targ
     targetQ = undefined;
   }
   const notes = String(input.notes ?? '').slice(0, 4000);
-  return { disposition, targetFY, targetQ: targetFY ? (targetQ ?? 4) : undefined, notes };
+  let confidence = input.confidence ? String(input.confidence) as AppPlan['confidence'] : undefined;
+  if (confidence && !VALID_CONF.has(confidence)) throw new HttpError(400, `Unknown confidence: ${confidence}`);
+  if (!keep) confidence = undefined;
+  return { disposition, targetFY, targetQ: targetFY ? (targetQ ?? 4) : undefined, notes, confidence };
 }
 
 function appTotals(inv: Inventory | null) {
@@ -205,6 +210,14 @@ api.put('/settings', wrap((req, res) => {
   if (patch.includePoweredOff !== undefined) next.includePoweredOff = !!patch.includePoweredOff;
   if (Array.isArray(patch.deadlines)) next.deadlines = patch.deadlines.slice(0, 50);
   if (patch.clusterVendor && typeof patch.clusterVendor === 'object') next.clusterVendor = patch.clusterVendor;
+  if (patch.confidenceWeights && typeof patch.confidenceWeights === 'object') {
+    const w = { ...cur.confidenceWeights };
+    for (const k of ['high', 'medium', 'low', 'unknown', 'unrated'] as const) {
+      const v = Number(patch.confidenceWeights[k]);
+      if (Number.isFinite(v)) w[k] = Math.max(0, Math.min(100, Math.round(v)));
+    }
+    next.confidenceWeights = w;
+  }
   store.saveSettings(next);
   res.json({ settings: fullSettings(), rev: store.rev() });
 }));
@@ -253,10 +266,10 @@ api.get('/uploads/:id/file', (req, res) => {
   res.end(Buffer.from(f.file));
 });
 
-api.get('/export/treatment-plan.xlsx', wrap(async (_req, res) => {
+api.get('/export/treatment-plan.xlsx', wrap(async (req, res) => {
   const id = store.latestUploadId();
   const inv = id ? store.getInventory(id) : null;
-  const buf = await buildTreatmentWorkbook({ inventory: inv, plans: store.getPlans(), settings: fullSettings(), history: store.history({ limit: 5000 }), uploads: store.listUploads() });
+  const buf = await buildTreatmentWorkbook({ inventory: inv, plans: store.getPlans(), settings: fullSettings(), history: store.history({ limit: 5000 }), uploads: store.listUploads(), basis: req.query.basis === 'plan' ? 'plan' : 'risk' });
   const name = `Treatment-Plan-${new Date().toISOString().slice(0, 10)}.xlsx`;
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="${name}"`);

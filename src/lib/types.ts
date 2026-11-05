@@ -84,11 +84,18 @@ export type Disposition =
 
 export type Quarter = 1 | 2 | 3 | 4;
 
+/** How confident we are the application is off on-prem by its target quarter. Undefined = not rated. */
+export type Confidence = 'high' | 'medium' | 'low' | 'unknown';
+
+/** Percent weights used for the risk-adjusted forecast (0-100). */
+export type ConfidenceWeights = Record<Confidence | 'unrated', number>;
+
 export interface AppPlan {
   disposition: Disposition;
   targetFY?: number; // e.g. 28 => FY28
   targetQ?: Quarter; // quarter of the FY in which it leaves on-prem (default Q4)
   notes?: string;
+  confidence?: Confidence;
   // server-maintained
   version?: number;
   updatedBy?: string;
@@ -97,13 +104,14 @@ export interface AppPlan {
 
 export type PlanMap = Record<string, AppPlan>;
 
-export type HwVendor = 'Cisco' | 'Lenovo' | 'Other';
+/** 'Cisco' = Cisco HyperFlex (kept as 'Cisco' for compatibility with saved data). */
+export type HwVendor = 'Cisco' | 'FlashStack' | 'Lenovo' | 'Other';
 
 export interface Deadline {
   id: string;
   label: string;
   date: string; // yyyy-mm-dd
-  kind: 'VMware' | 'Cisco' | 'Lenovo' | 'Other';
+  kind: 'VMware' | 'Cisco' | 'FlashStack' | 'Lenovo' | 'Other';
   confirmed: boolean;
   note?: string;
 }
@@ -114,6 +122,7 @@ export interface Settings {
   includePoweredOff: boolean;
   deadlines: Deadline[];
   clusterVendor: Record<string, HwVendor>;
+  confidenceWeights: ConfidenceWeights;
 }
 
 export interface AppInfo {

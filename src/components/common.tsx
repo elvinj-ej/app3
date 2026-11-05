@@ -1,6 +1,7 @@
 import { DISP } from '../lib/dispositions';
 import { quarterLabel, quarterRange } from '../lib/fy';
 import type { AppPlan, HistoryEntry } from '../lib/types';
+import { CONFIDENCE } from '../lib/defaults';
 
 export function timeAgo(iso?: string): string {
   if (!iso) return '';
@@ -29,6 +30,7 @@ export function PlanChip({ p }: { p: Partial<AppPlan> | null | undefined }) {
     <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
       {m && <span className="chip"><i className="dot" style={{ background: m.color }} />{m.short}</span>}
       {p.targetFY ? <span className="chip">{quarterLabel(p.targetFY, p.targetQ ?? 4)}</span> : null}
+      {p.confidence ? <span className="chip"><i className="dot" style={{ background: CONFIDENCE.find((c) => c.id === p.confidence)?.color }} />{CONFIDENCE.find((c) => c.id === p.confidence)?.label} confidence</span> : null}
       {p.notes ? <span className="muted" style={{ fontSize: 12 }}>“{p.notes}”</span> : null}
     </span>
   );

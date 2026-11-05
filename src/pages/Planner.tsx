@@ -5,7 +5,8 @@ import { fyLabel, fyOf, fyQuarterOf, quarterLabel, quarterRange } from '../lib/f
 import { groupApps, planFor, scopeVMs, type AppRow } from '../lib/projection';
 import { parseApp, TIER_ORDER } from '../lib/parse';
 import { fmt } from '../lib/useColors';
-import type { AppPlan, Disposition, Quarter, VM } from '../lib/types';
+import type { AppPlan, Confidence, ConfidenceWeights, Disposition, Quarter, VM } from '../lib/types';
+import { CONFIDENCE, CONFIDENCE_LABEL } from '../lib/defaults';
 import { downloadCSV } from '../lib/exporter';
 import { api } from '../lib/api';
 import { HistoryRow, timeAgo, fmtDateTime } from '../components/common';
@@ -13,7 +14,7 @@ import type { HistoryEntry } from '../lib/types';
 
 type View = 'apps' | 'vms';
 type SortDir = 1 | -1;
-type AppSortKey = 'name' | 'domain' | 'tier' | 'vmCount' | 'vcpu' | 'disposition' | 'target';
+type AppSortKey = 'name' | 'domain' | 'tier' | 'vmCount' | 'vcpu' | 'disposition' | 'target' | 'confidence';
 type VmSortKey = 'name' | 'app' | 'domain' | 'tier' | 'environment' | 'location' | 'vcpu' | 'memGB' | 'disposition';
 
 const tierRank = (t: string) => {
@@ -21,6 +22,7 @@ const tierRank = (t: string) => {
   return i < 0 ? 99 : i;
 };
 const dispRank = (d: Disposition) => DISPOSITIONS.findIndex((x) => x.id === d);
+const confRank = (p: AppPlan) => (DISP[p.disposition].leavesOnPrem ? (p.confidence ? ['high', 'medium', 'low', 'unknown'].indexOf(p.confidence) : 4) : 5);
 const targetRank = (p: AppPlan) => (p.targetFY ? p.targetFY * 10 + (p.targetQ ?? 4) : 9999);
 
 export default function Planner() {
@@ -30,6 +32,7 @@ export default function Planner() {
   const [domain, setDomain] = useState('');
   const [tier, setTier] = useState('');
   const [disp, setDisp] = useState('');
+  const [conf, setConf] = useState('');
   const [site, setSite] = useState('');
   const [env, setEnv] = useState('');
   const [sortApp, setSortApp] = useState<{ k: AppSortKey; d: SortDir }>({ k: 'vcpu', d: -1 });
@@ -58,6 +61,8 @@ export default function Planner() {
   }, [settings.currentFY, settings.horizonFY]);
   const [historyFor, setHistoryFor] = useState<string | null>(null);
 
+  const confMatches = (p: AppPlan) =>
+    !conf || (DISP[p.disposition].leavesOnPrem && (conf === 'unrated' ? !p.confidence : p.confidence === conf));
   const ql = q.trim().toLowerCase();
   const vmMatches = (v: VM) =>
     (!site || v.site === site) &&
@@ -65,7 +70,8 @@ export default function Planner() {
   const appMatches = (a: AppRow) =>
     (!domain || a.domain === domain) &&
     (!tier || a.tier === tier) &&
-    (!disp || planFor(plans, a.key).disposition === disp);
+    (!disp || planFor(plans, a.key).disposition === disp) &&
+    confMatches(planFor(plans, a.key));
 
   const apps = useMemo(() => {
     const out = allApps
@@ -83,6 +89,7 @@ export default function Planner() {
         case 'vcpu': return a.vcpu;
         case 'disposition': return dispRank(p.disposition);
         case 'target': return targetRank(p);
+        case 'confidence': return confRank(p);
       }
     };
     return out.sort((a, b) => {
@@ -90,7 +97,7 @@ export default function Planner() {
       return (x < y ? -1 : x > y ? 1 : b.vcpu - a.vcpu) * d;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allApps, plans, domain, tier, disp, site, env, ql, sortApp]);
+  }, [allApps, plans, domain, tier, disp, conf, site, env, ql, sortApp]);
 
   const vmRows = useMemo(() => {
     if (view !== 'vms') return [];
@@ -101,6 +108,7 @@ export default function Planner() {
         (!domain || a.domain === domain) &&
         (!tier || a.tier === tier) &&
         (!disp || planFor(plans, v.appKey).disposition === disp) &&
+        confMatches(planFor(plans, v.appKey)) &&
         (!ql || v.name.toLowerCase().includes(ql) || v.appKey.toLowerCase().includes(ql) || v.owner.toLowerCase().includes(ql))
       );
     });
@@ -124,7 +132,7 @@ export default function Planner() {
       return (x < y ? -1 : x > y ? 1 : a.name.localeCompare(b.name)) * d;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, vms, plans, domain, tier, disp, site, env, ql, sortVm]);
+  }, [view, vms, plans, domain, tier, disp, conf, site, env, ql, sortVm]);
 
   const shown = view === 'apps'
     ? { apps: apps.length, vms: apps.reduce((s, a) => s + a.vmCount, 0), vcpu: apps.reduce((s, a) => s + a.vcpu, 0) }
@@ -159,6 +167,7 @@ export default function Planner() {
         VMName: v.name, Application_Primary: v.appKey, Application: a.name, Domain: a.domain, Tier: a.tier,
         Environment: v.environment, VCenter: v.vcenter, VMLocation: v.location, PowerState: v.poweredOn ? 'PoweredOn' : 'PoweredOff',
         vCPU: v.vcpu, MemoryGB: v.memGB, Disposition: DISP[p.disposition].label,
+        Confidence: DISP[p.disposition].leavesOnPrem ? (p.confidence ? CONFIDENCE_LABEL[p.confidence] : 'Not rated') : '',
         TargetFY: p.targetFY ? fyLabel(p.targetFY) : '', TargetQuarter: p.targetFY ? `Q${p.targetQ ?? 4}` : '', Notes: p.notes ?? '',
       };
     });
@@ -201,6 +210,11 @@ export default function Planner() {
               <option value="">All dispositions</option>
               {DISPOSITIONS.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
             </select>
+            <select className="select" value={conf} onChange={(e) => setConf(e.target.value)} aria-label="Filter by confidence">
+              <option value="">All confidence</option>
+              {CONFIDENCE.map((c) => <option key={c.id} value={c.id}>{c.label} confidence</option>)}
+              <option value="unrated">Not rated (moves only)</option>
+            </select>
             <select className="select" value={site} onChange={(e) => setSite(e.target.value)} aria-label="vCenter">
               <option value="">All vCenters</option>
               {sites.map((d) => <option key={d}>{d}</option>)}
@@ -209,8 +223,8 @@ export default function Planner() {
               <option value="">All environments</option>
               {envs.map((d) => <option key={d}>{d}</option>)}
             </select>
-            {(q || domain || tier || disp || site || env) && (
-              <button className="btn btn-sm" onClick={() => { setQ(''); setDomain(''); setTier(''); setDisp(''); setSite(''); setEnv(''); }}>Clear</button>
+            {(q || domain || tier || disp || conf || site || env) && (
+              <button className="btn btn-sm" onClick={() => { setQ(''); setDomain(''); setTier(''); setDisp(''); setConf(''); setSite(''); setEnv(''); }}>Clear</button>
             )}
             <span className="note" style={{ marginLeft: 'auto' }}>
               {shown.apps} apps · {fmt(shown.vms)} VMs · {fmt(shown.vcpu)} vCPU
@@ -237,6 +251,7 @@ export default function Planner() {
                   <th>Envs</th>
                   <AppTh k="disposition">Disposition</AppTh>
                   <AppTh k="target">Off on-prem by (FY · quarter)</AppTh>
+                  <AppTh k="confidence">Confidence</AppTh>
                   <th style={{ minWidth: 150 }}>Notes</th>
                   <th>Last change</th>
                 </tr>
@@ -273,6 +288,9 @@ export default function Planner() {
                         <td>
                           <TargetPicker plan={p} options={targetOptions} onChange={(patch) => setPlan(a.key, patch)} />
                         </td>
+                        <td>
+                          <ConfidencePicker plan={p} weights={settings.confidenceWeights} onChange={(c) => setPlan(a.key, { confidence: c })} />
+                        </td>
                         <td><NotesInput value={p.notes ?? ''} onCommit={(notes) => setPlan(a.key, { notes })} /></td>
                         <td style={{ whiteSpace: 'nowrap' }}>
                           {p.updatedBy ? (
@@ -290,13 +308,13 @@ export default function Planner() {
                           <td className="muted" colSpan={1}>{v.poweredOn ? 'On' : 'Off'}</td>
                           <td className="r num">{v.vcpu}</td>
                           <td><span className="chip">{v.environment}</span></td>
-                          <td className="muted" colSpan={4}>{v.location} · {fmt(v.memGB)} GB RAM · {fmt(v.storageProvGB)} GB disk</td>
+                          <td className="muted" colSpan={5}>{v.location} · {fmt(v.memGB)} GB RAM · {fmt(v.storageProvGB)} GB disk</td>
                         </tr>
                       ))}
                     </Fragment>
                   );
                 })}
-                {apps.length === 0 && <tr><td colSpan={12} className="empty">No applications match these filters.</td></tr>}
+                {apps.length === 0 && <tr><td colSpan={13} className="empty">No applications match these filters.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -412,6 +430,21 @@ function TargetPicker({ plan, options, onChange }: { plan: AppPlan; options: { f
   );
 }
 
+function ConfidencePicker({ plan, weights, onChange }: { plan: AppPlan; weights: ConfidenceWeights; onChange: (c: Confidence | undefined) => void }) {
+  if (!DISP[plan.disposition].leavesOnPrem) return <span className="muted">—</span>;
+  const c = plan.confidence;
+  const meta = CONFIDENCE.find((x) => x.id === c);
+  return (
+    <div className="disp-cell" title={c ? `${weights[c]}% of this workload counted as moved in the risk-adjusted forecast` : `Not rated – counted at ${weights.unrated}% in the risk-adjusted forecast`}>
+      <i className="dot" style={{ background: meta ? meta.color : 'transparent', border: meta ? 0 : '1px dashed var(--border-strong)' }} />
+      <select className="select select-sm" value={c ?? ''} aria-label="Confidence" onChange={(e) => onChange((e.target.value || null) as Confidence | undefined)}>
+        <option value="">Not rated</option>
+        {CONFIDENCE.map((x) => <option key={x.id} value={x.id}>{x.label} · {weights[x.id]}%</option>)}
+      </select>
+    </div>
+  );
+}
+
 function NotesInput({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
   const [v, setV] = useState(value);
   const [prev, setPrev] = useState(value);
@@ -430,6 +463,7 @@ function NotesInput({ value, onCommit }: { value: string; onCommit: (v: string) 
 function BulkBar({ count, options, onApply, onClear }: { count: number; options: { fy: number; q: number }[]; onApply: (p: Partial<AppPlan>) => void; onClear: () => void }) {
   const [d, setD] = useState<Disposition | ''>('');
   const [t, setT] = useState('');
+  const [c, setC] = useState('');
   return (
     <div className="bulkbar">
       <b>{count} selected</b>
@@ -438,7 +472,12 @@ function BulkBar({ count, options, onApply, onClear }: { count: number; options:
         {DISPOSITIONS.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
       </select>
       <TargetSelect value={t} options={options} onChange={setT} placeholder="Target quarter (unchanged)" />
-      <button className="btn btn-sm" disabled={!d && !t}
+      <select className="select select-sm" value={c} onChange={(e) => setC(e.target.value)} aria-label="Bulk confidence">
+        <option value="">Confidence (unchanged)</option>
+        {CONFIDENCE.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
+        <option value="clear">Clear (not rated)</option>
+      </select>
+      <button className="btn btn-sm" disabled={!d && !t && !c}
         onClick={() => {
           const patch: Partial<AppPlan> = {};
           if (d) patch.disposition = d;
@@ -447,6 +486,7 @@ function BulkBar({ count, options, onApply, onClear }: { count: number; options:
             patch.targetFY = fy;
             patch.targetQ = q as Quarter;
           }
+          if (c) patch.confidence = (c === 'clear' ? null : c) as Confidence;
           onApply(patch);
         }}>Apply to {count}</button>
       <button className="btn btn-sm" onClick={onClear} style={{ marginLeft: 'auto' }}>Clear selection</button>

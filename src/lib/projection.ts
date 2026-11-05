@@ -1,7 +1,8 @@
 import { DISP, DISPOSITIONS } from './dispositions.ts';
 import { fyEnd, fyLabel, fyOf, fyQuarterEnd, fyQuarterOf, quarterLabel } from './fy.ts';
 import { parseApp } from './parse.ts';
-import type { AppInfo, AppPlan, Disposition, PlanMap, Settings, VM } from './types.ts';
+import type { AppInfo, AppPlan, ConfidenceWeights, Disposition, PlanMap, Settings, VM } from './types.ts';
+import { DEFAULT_WEIGHTS, moveWeight } from './defaults.ts';
 
 export const DEFAULT_PLAN: AppPlan = { disposition: 'tbd' };
 
@@ -44,6 +45,36 @@ export function footprintAt(vms: VM[], plans: PlanMap, at: Date, filter?: (v: VM
   return totals(remaining);
 }
 
+export interface Scenarios {
+  /** Every scheduled move happens on time. */
+  plan: Totals;
+  /** Each move weighted by its confidence (headline forecast). */
+  risk: Totals;
+  /** Only High-confidence moves happen. */
+  committed: Totals;
+}
+
+/** On-prem footprint remaining at a date under the three confidence scenarios. */
+export function footprintScenarios(vms: VM[], plans: PlanMap, at: Date, weights: ConfidenceWeights = DEFAULT_WEIGHTS, filter?: (v: VM) => boolean): Scenarios {
+  const z = () => ({ vms: 0, vcpu: 0, memGB: 0 });
+  const plan = z(), risk = z(), committed = z();
+  for (const v of vms) {
+    if (filter && !filter(v)) continue;
+    const p = planFor(plans, v.appKey);
+    const d = exitDate(p);
+    const gone = !!d && d <= at;
+    const add = (t: Totals, f: number) => {
+      t.vms += f;
+      t.vcpu += v.vcpu * f;
+      t.memGB += v.memGB * f;
+    };
+    add(plan, gone ? 0 : 1);
+    add(risk, gone ? 1 - moveWeight(p.confidence, weights) : 1);
+    add(committed, gone && p.confidence === 'high' ? 0 : 1);
+  }
+  return { plan, risk, committed };
+}
+
 export type Granularity = 'quarter' | 'fy';
 
 export interface Period {
@@ -76,28 +107,48 @@ export function periodIndexFor(ps: Period[], d: Date): number {
 
 export interface TrendPoint {
   label: string;
+  /** Risk-adjusted (headline) */
   vms: number;
   vcpu: number;
   vmsPct: number;
   vcpuPct: number;
+  /** Full plan (best case) and committed (High confidence only) */
+  vmsPlan: number;
+  vcpuPlan: number;
+  vmsCommit: number;
+  vcpuCommit: number;
+  vmsPlanPct: number;
+  vcpuPlanPct: number;
+  vmsCommitPct: number;
+  vcpuCommitPct: number;
 }
+
+const r1 = (n: number) => Math.round(n * 10) / 10;
 
 /** "Now" plus the projected on-prem footprint at the end of each period up to the horizon. */
 export function trend(vms: VM[], plans: PlanMap, settings: Settings, gran: Granularity = 'fy'): TrendPoint[] {
   const base = totals(vms);
-  const pct = (n: number, d: number) => (d ? Math.round((n / d) * 1000) / 10 : 0);
-  const pts: TrendPoint[] = [{ label: 'Now', vms: base.vms, vcpu: base.vcpu, vmsPct: 100, vcpuPct: 100 }];
-  for (const p of periods(settings, gran)) {
-    const t = footprintAt(vms, plans, p.end);
-    pts.push({ label: p.label, vms: t.vms, vcpu: t.vcpu, vmsPct: pct(t.vms, base.vms), vcpuPct: pct(t.vcpu, base.vcpu) });
-  }
+  const pct = (n: number, d: number) => (d ? r1((n / d) * 100) : 0);
+  const point = (label: string, sc: Scenarios): TrendPoint => ({
+    label,
+    vms: Math.round(sc.risk.vms), vcpu: Math.round(sc.risk.vcpu),
+    vmsPct: pct(sc.risk.vms, base.vms), vcpuPct: pct(sc.risk.vcpu, base.vcpu),
+    vmsPlan: sc.plan.vms, vcpuPlan: sc.plan.vcpu, vmsCommit: sc.committed.vms, vcpuCommit: sc.committed.vcpu,
+    vmsPlanPct: pct(sc.plan.vms, base.vms), vcpuPlanPct: pct(sc.plan.vcpu, base.vcpu),
+    vmsCommitPct: pct(sc.committed.vms, base.vms), vcpuCommitPct: pct(sc.committed.vcpu, base.vcpu),
+  });
+  const b = { vms: base.vms, vcpu: base.vcpu, memGB: base.memGB };
+  const pts: TrendPoint[] = [point('Now', { plan: b, risk: b, committed: b })];
+  const w = settings.confidenceWeights ?? DEFAULT_WEIGHTS;
+  for (const p of periods(settings, gran)) pts.push(point(p.label, footprintScenarios(vms, plans, p.end, w)));
   return pts;
 }
 
 export type ExitRow = { label: string; total: number; apps: number } & Partial<Record<Disposition, number>>;
 
 /** vCPU (or VMs) leaving on-prem in each period, split by disposition. Exits past the horizon are omitted. */
-export function exitsBy(vms: VM[], plans: PlanMap, settings: Settings, metric: 'vcpu' | 'vms', gran: Granularity = 'fy'): ExitRow[] {
+/** weighted = true multiplies each move by its confidence weight (risk-adjusted view). */
+export function exitsBy(vms: VM[], plans: PlanMap, settings: Settings, metric: 'vcpu' | 'vms', gran: Granularity = 'fy', weighted = false): ExitRow[] {
   const ps = periods(settings, gran);
   const rows: ExitRow[] = ps.map((p) => ({ label: p.label, total: 0, apps: 0 }));
   const appSeen = ps.map(() => new Set<string>());
@@ -109,7 +160,8 @@ export function exitsBy(vms: VM[], plans: PlanMap, settings: Settings, metric: '
     if (d < new Date() && idx > 0) idx = 0;
     const r = rows[idx];
     const disp = planFor(plans, v.appKey).disposition;
-    const amt = metric === 'vcpu' ? v.vcpu : 1;
+    const w = weighted ? moveWeight(planFor(plans, v.appKey).confidence, settings.confidenceWeights ?? DEFAULT_WEIGHTS) : 1;
+    const amt = (metric === 'vcpu' ? v.vcpu : 1) * w;
     r[disp] = (r[disp] ?? 0) + amt;
     r.total += amt;
     appSeen[idx].add(v.appKey);

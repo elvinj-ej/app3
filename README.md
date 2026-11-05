@@ -17,7 +17,8 @@ FY runs **1 July – 30 June** (FY27 = Jul 2026 – Jun 2027). Q1 = Jul–Sep, Q
 The package contains `server.mjs` (the API server with every library bundled in), `app/` (the web pages) and
 `data/footprint.db`, which is created on first start. The database holds every decision, the change history, the
 settings and each uploaded VMInfo file, so **back up that file**. It is a single self-contained file and safe to copy while the server is running. To upgrade, replace `server.mjs` and `app/`
-and keep `data/`.
+and keep `data/`. When an upgrade changes the database structure, the server first saves a copy of the database to
+`data/backups/`.
 
 ## Pages
 
@@ -34,6 +35,20 @@ Treatment plan (one row per application: treatment, target FY, quarter, period, 
 who changed it last); Quarterly roadmap (apps, VMs and vCPU leaving and remaining per quarter, split by treatment);
 Apps by quarter; VMs; Change log; Inventory uploads; Chart data; and Unmatched decisions.
 The dashboard also has a **Print / Save as PDF** button that lays the executive summary out on A4 landscape pages.
+
+### Confidence and the risk-adjusted forecast
+
+For each application that leaves on-prem, the planner records a **confidence**: High, Medium, Low or Unknown. It is
+blank until someone rates it. Confidence means "it will be off on-prem by its target quarter". Each level counts a share of the
+workload as moved, and these weights are editable in Settings (defaults: High 100%, Medium 75%, Low 50%, Unknown 25%, Not rated 25%).
+
+The forecast is shown in three scenarios:
+- **Risk-adjusted** (default headline): every move is weighted by its confidence.
+- **Full plan**: every scheduled move happens on its target quarter.
+- **Committed**: only High-confidence moves happen. This is the safe floor.
+
+The **Risk-adjusted / Full plan** toggle on the Executive Summary switches every headline number and chart, and the
+Excel export follows it. The absolute charts shade the range from committed to full plan.
 
 ### Treatments
 
@@ -56,8 +71,9 @@ sign-in can be added later.
 
 `Application_Primary` is parsed as `Name - Tier - Domain (Service)`, for example
 `Windchill (CSV) - Tier1 - SCC (Product Lifecycle Management)` gives Domain **SCC** and Tier **Tier 1**. Environment,
-vCenter and cluster come from their own columns. The `Clusters` sheet supplies host and core counts. Clusters with
-`-HX-` in the name default to Cisco HyperFlex and all others to Lenovo; you can change this in Settings.
+vCenter and cluster come from their own columns. The `Clusters` sheet supplies host and core counts. Clusters default to
+Cisco FlashStack (Equinix-Linux, Equinix-Windows, MacPark-CCTV, MacPark-Linux, MacPark-Windows), Cisco HyperFlex
+(names containing `-HX-`) or Lenovo (all others). You can change any cluster in Settings.
 
 ## Data privacy
 

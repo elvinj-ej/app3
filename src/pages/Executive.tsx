@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
 import {
-  Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  Area, Bar, BarChart, CartesianGrid, ComposedChart, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import { useStore, vendorOf } from '../lib/store';
 import { DISP, DISPOSITIONS } from '../lib/dispositions';
 import { daysUntil, fmtDate, fyEnd, fyLabel, fyOf, fyQuarterOf, humanCountdown, parseISODate, quarterLabel, quarterRange } from '../lib/fy';
-import { byDisposition, exitsBy, footprintAt, groupApps, planFor, scopeVMs, totals, trend, type Granularity } from '../lib/projection';
+import { byDisposition, exitDate, exitsBy, footprintScenarios, groupApps, planFor, scopeVMs, totals, trend, type Granularity, type Scenarios, type TrendPoint } from '../lib/projection';
+import { CONFIDENCE, VENDOR_LABEL, deadlineVendor } from '../lib/defaults';
 import { parseApp } from '../lib/parse';
 import { fmt, useColors } from '../lib/useColors';
 import type { Deadline } from '../lib/types';
@@ -16,11 +17,28 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
   const [mode, setMode] = useState<'indexed' | 'absolute'>('indexed');
   const [exitMetric, setExitMetric] = useState<'vcpu' | 'vms'>('vcpu');
   const [gran, setGran] = useState<Granularity>('quarter');
+  const [basis, setBasisState] = useState<Basis>(() => {
+    try {
+      return localStorage.getItem('fp.basis') === 'plan' ? 'plan' : 'risk';
+    } catch {
+      return 'risk';
+    }
+  });
+  const setBasis = (b: Basis) => {
+    setBasisState(b);
+    try {
+      localStorage.setItem('fp.basis', b);
+    } catch {
+      /* ignore */
+    }
+  };
+  const isRisk = basis === 'risk';
+  const bLabel = isRisk ? 'risk-adjusted' : 'full plan';
 
   const vms = useMemo(() => scopeVMs(inventory.vms, settings), [inventory, settings]);
   const base = useMemo(() => totals(vms), [vms]);
-  const points = useMemo(() => trend(vms, plans, settings, gran), [vms, plans, settings, gran]);
-  const exits = useMemo(() => exitsBy(vms, plans, settings, exitMetric, gran), [vms, plans, settings, exitMetric, gran]);
+  const points = useMemo<ViewPoint[]>(() => trend(vms, plans, settings, gran).map((p) => toView(p, basis)), [vms, plans, settings, gran, basis]);
+  const exits = useMemo(() => exitsBy(vms, plans, settings, exitMetric, gran, isRisk), [vms, plans, settings, exitMetric, gran, isRisk]);
   const disp = useMemo(() => byDisposition(vms, plans), [vms, plans]);
   const apps = useMemo(() => groupApps(vms), [vms]);
   const endPt = points[points.length - 1];
@@ -28,6 +46,19 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
   const decidedApps = apps.filter((a) => planFor(plans, a.key).disposition !== 'tbd').length;
   const decidedVcpu = vms.filter((v) => planFor(plans, v.appKey).disposition !== 'tbd').reduce((s, v) => s + v.vcpu, 0);
   const unscheduled = disp.reduce((s, d) => s + d.unscheduledVms, 0);
+  const confStats = useMemo(() => {
+    const by = { high: 0, medium: 0, low: 0, unknown: 0 };
+    let total = 0;
+    const unrated = new Set<string>();
+    for (const v of vms) {
+      const p = planFor(plans, v.appKey);
+      if (!exitDate(p)) continue;
+      total += v.vcpu;
+      if (p.confidence) by[p.confidence] += v.vcpu;
+      else unrated.add(v.appKey);
+    }
+    return { by, total, unratedApps: unrated.size };
+  }, [vms, plans]);
 
   const deadlines = [...settings.deadlines].sort((a, b) => a.date.localeCompare(b.date));
   const nextDl = deadlines.find((d) => daysUntil(d.date) >= 0);
@@ -75,6 +106,10 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
           </p>
         </div>
         <div className="filters no-print">
+          <div className="seg" role="group" aria-label="Forecast basis" title="Risk-adjusted weights each move by its confidence. Full plan assumes every move happens on its target quarter.">
+            <button aria-pressed={isRisk} onClick={() => setBasis('risk')}>Risk-adjusted</button>
+            <button aria-pressed={!isRisk} onClick={() => setBasis('plan')}>Full plan</button>
+          </div>
           <div className="seg" role="group" aria-label="Timeline granularity">
             <button aria-pressed={gran === 'quarter'} onClick={() => setGran('quarter')}>By quarter</button>
             <button aria-pressed={gran === 'fy'} onClick={() => setGran('fy')}>By FY</button>
@@ -88,7 +123,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
             Include powered-off VMs ({inventory.vms.filter((v) => !v.poweredOn).length})
           </label>
           <button className="btn" onClick={printSummary}>Print / Save as PDF</button>
-          <a className="btn btn-primary" href="api/export/treatment-plan.xlsx" title="Executive summary with charts, treatment plan, quarterly roadmap, VMs and change log">Export to Excel (with charts)</a>
+          <a className="btn btn-primary" href={`api/export/treatment-plan.xlsx?basis=${basis}`} title="Executive summary with charts (follows the Risk-adjusted / Full plan toggle), treatment plan, quarterly roadmap, VMs and change log">Export to Excel (with charts)</a>
         </div>
       </div>
 
@@ -105,13 +140,16 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
           <div className="k-foot">Primary licensing driver</div>
         </div>
         <div className="card kpi">
-          <div className="k-label">Projected at end of {fyLabel(settings.horizonFY)}</div>
+          <div className="k-label">Projected at end of {fyLabel(settings.horizonFY)} · {bLabel}</div>
           <div className="k-value num">
             {fmt(endPt.vcpu)}<small>vCPU</small>
           </div>
           <div className="k-foot">
             {fmt(endPt.vms)} VMs ·{' '}
             <span className="delta-down">−{fmt(100 - endPt.vcpuPct)}% vCPU</span>
+          </div>
+          <div className="k-foot" title="Full plan = every scheduled move happens on its target quarter. Committed = only High-confidence moves happen.">
+            {isRisk ? `Full plan ${fmt(endPt.vcpuPlan)}` : `Risk-adjusted ${fmt(endPt.vcpuRisk)}`} · committed {fmt(endPt.vcpuCommit)}
           </div>
         </div>
         <div className="card kpi">
@@ -126,6 +164,14 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
             })}
           </div>
           <div className="k-foot">{Math.round((decidedVcpu / (base.vcpu || 1)) * 100)}% of vCPU has a disposition</div>
+        </div>
+        <div className="card kpi">
+          <div className="k-label">Confidence of scheduled moves</div>
+          <div className="k-value num">{confStats.total ? Math.round(((confStats.by.high + confStats.by.medium) / confStats.total) * 100) : 0}%<small>High / Medium</small></div>
+          <div className="meter" title="Share of scheduled vCPU by confidence">
+            {CONFIDENCE.map((c) => (confStats.by[c.id] ? <span key={c.id} style={{ width: `${(confStats.by[c.id] / confStats.total) * 100}%`, background: c.color }} /> : null))}
+          </div>
+          <div className="k-foot">{confStats.unratedApps ? `${confStats.unratedApps} scheduled apps not rated yet` : 'All scheduled apps rated'}</div>
         </div>
         <div className="card kpi">
           <div className="k-label">Next deadline</div>
@@ -158,8 +204,8 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
               <h2>On-prem footprint by {gran === 'quarter' ? 'quarter' : 'financial year'}</h2>
               <p className="sub">
                 {mode === 'indexed'
-                  ? `VMs and vCPU remaining at the end of each ${gran === 'quarter' ? 'FY quarter' : 'FY'}, indexed to today = 100%. Hover for absolute values.`
-                  : `VMs and vCPU remaining at the end of each ${gran === 'quarter' ? 'FY quarter' : 'FY'}.`}
+                  ? `${isRisk ? 'Risk-adjusted' : 'Full-plan'} VMs and vCPU remaining at the end of each ${gran === 'quarter' ? 'FY quarter' : 'FY'}, indexed to today = 100%. Hover for the other scenarios.`
+                  : `${isRisk ? 'Risk-adjusted forecast' : 'Full plan'} (solid line) within the range from committed (High confidence only) to full plan (every move on its target quarter).`}
               </p>
             </div>
             <div className="seg" role="group" aria-label="Chart scale">
@@ -170,6 +216,8 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
           <div className="legend" style={{ marginBottom: 8 }}>
             <span><i className="ln" style={{ background: 'var(--line-vm)' }} /> VMs</span>
             <span><i className="ln" style={{ background: 'var(--line-vcpu)' }} /> vCPU</span>
+            {mode === 'absolute' && <span><i className="dot" style={{ background: 'var(--line-vm)', opacity: 0.18, width: 16 }} /> Range: committed ↔ full plan</span>}
+            {mode === 'absolute' && <span><i className="ln" style={{ background: 'none', borderTop: '2px dashed var(--text-3)' }} /> {isRisk ? 'Full plan' : 'Risk-adjusted'}</span>}
             {refLines.length > 0 && <span><i className="dl" /> Deadline ({gran === 'quarter' ? 'quarter' : 'FY'} it falls in)</span>}
           </div>
           {mode === 'indexed' ? (
@@ -194,15 +242,17 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
                 <div key={f}>
                   <div className="note" style={{ fontWeight: 600, color: 'var(--text-2)' }}>{f === 'vms' ? 'VMs' : 'vCPU'}</div>
                   <ResponsiveContainer width="100%" height={300}>
-                    <LineChart data={points} margin={{ top: 18, right: 16, left: 0, bottom: 0 }}>
+                    <ComposedChart data={points.map((p) => ({ ...p, band: f === 'vms' ? [p.vmsPlan, p.vmsCommit] : [p.vcpuPlan, p.vcpuCommit] }))} margin={{ top: 18, right: 16, left: 0, bottom: 0 }}>
                       <CartesianGrid vertical={false} stroke={color('--grid')} />
                       <XAxis dataKey="label" {...axisProps} {...xTick} />
                       <YAxis {...axisProps} axisLine={false} width={48} tickFormatter={(v) => fmt(v)} domain={[0, 'auto']} />
                       <Tooltip content={<TrendTip />} cursor={{ stroke: color('--border-strong') }} />
                       {refs(color('--text-2'), false)}
+                      <Area animationDuration={500} type="linear" dataKey="band" stroke="none" fill={color(f === 'vms' ? '--line-vm' : '--line-vcpu')} fillOpacity={0.16} activeDot={false} />
+                      <Line animationDuration={500} type="linear" dataKey={f === 'vms' ? 'altVms' : 'altVcpu'} stroke={color('--text-3')} strokeWidth={1.5} strokeDasharray="4 3" dot={false} activeDot={false} />
                       <Line animationDuration={500} type="linear" dataKey={f} stroke={color(f === 'vms' ? '--line-vm' : '--line-vcpu')} strokeWidth={2}
                         dot={{ r: dotR, strokeWidth: 2, stroke: color('--surface'), fill: color(f === 'vms' ? '--line-vm' : '--line-vcpu') }} activeDot={{ r: 6 }} />
-                    </LineChart>
+                    </ComposedChart>
                   </ResponsiveContainer>
                 </div>
               ))}
@@ -212,7 +262,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
             <summary className="note" style={{ cursor: 'pointer' }}>Table view</summary>
             <table className="t" style={{ marginTop: 8 }}>
               <thead>
-                <tr><th>Point</th><th className="r">VMs</th><th className="r">% of today</th><th className="r">vCPU</th><th className="r">% of today</th></tr>
+                <tr><th>Point</th><th className="r">VMs ({bLabel})</th><th className="r">% of today</th><th className="r">vCPU ({bLabel})</th><th className="r">% of today</th><th className="r">vCPU risk-adjusted</th><th className="r">vCPU full plan</th><th className="r">vCPU committed</th></tr>
               </thead>
               <tbody>
                 {points.map((p) => (
@@ -220,6 +270,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
                     <td>{p.label === 'Now' ? 'Today' : `End of ${p.label}`}</td>
                     <td className="r num">{fmt(p.vms)}</td><td className="r num">{p.vmsPct}%</td>
                     <td className="r num">{fmt(p.vcpu)}</td><td className="r num">{p.vcpuPct}%</td>
+                    <td className="r num">{fmt(p.vcpuRisk)}</td><td className="r num">{fmt(p.vcpuPlan)}</td><td className="r num">{fmt(p.vcpuCommit)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -232,17 +283,17 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
           <div className="card-head">
             <div>
               <h2>Key deadlines</h2>
-              <p className="sub">Projected on-prem footprint on each date</p>
+              <p className="sub">Projected on-prem vCPU on each date: risk-adjusted · full plan · committed</p>
             </div>
-            <a className="btn btn-sm" href="#/data">Edit</a>
+            <a className="btn btn-sm" href="#/settings">Edit</a>
           </div>
           {deadlines.length === 0 && <div className="note">No deadlines set.</div>}
           {deadlines.map((d) => {
             const at = parseISODate(d.date);
-            const fp = footprintAt(vms, plans, at);
-            const vendor = d.kind === 'Cisco' || d.kind === 'Lenovo' ? d.kind : null;
-            const onVendor = vendor ? footprintAt(vms, plans, at, (v) => vendorOf(settings, v.location) === vendor) : null;
-            const vendorToday = vendor ? totals(vms.filter((v) => vendorOf(settings, v.location) === vendor)) : null;
+            const vendor = deadlineVendor(d.kind);
+            const vf = vendor ? (v: { location: string }) => vendorOf(settings, v.location) === vendor : undefined;
+            const sc = footprintScenarios(vms, plans, at, settings.confidenceWeights, vf);
+            const today = totals(vf ? vms.filter(vf) : vms);
             const days = daysUntil(d.date);
             return (
               <div className="deadline" key={d.id}>
@@ -258,13 +309,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
                   {fmtDate(d.date)} · {fyLabel(fyOf(at))} · {humanCountdown(days)}
                 </div>
                 <div className="dl-proj">
-                  {vendor && onVendor && vendorToday ? (
-                    <>On {vendor} clusters: <b className="num">{fmt(onVendor.vcpu)}</b> vCPU / <b className="num">{fmt(onVendor.vms)}</b> VMs
-                      {' '}(today {fmt(vendorToday.vcpu)} / {fmt(vendorToday.vms)})</>
-                  ) : (
-                    <>Remaining: <b className="num">{fmt(fp.vcpu)}</b> vCPU / <b className="num">{fmt(fp.vms)}</b> VMs
-                      {' '}({base.vcpu ? Math.round((fp.vcpu / base.vcpu) * 100) : 0}% of today)</>
-                  )}
+                  <DeadlineNumbers sc={sc} today={today} basis={basis} scope={vendor ? `On ${VENDOR_LABEL[vendor]} clusters` : 'Remaining'} />
                 </div>
               </div>
             );
@@ -278,7 +323,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
           <div className="card-head">
             <div>
               <h2>Leaving on-prem each {gran === 'quarter' ? 'quarter' : 'FY'}</h2>
-              <p className="sub">By target disposition (scheduled applications only)</p>
+              <p className="sub">By treatment – {isRisk ? 'each move weighted by its confidence' : 'every scheduled move at full value'}</p>
             </div>
             <div className="seg" role="group" aria-label="Metric">
               <button aria-pressed={exitMetric === 'vcpu'} onClick={() => setExitMetric('vcpu')}>vCPU</button>
@@ -353,7 +398,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
       <UpcomingMoves />
 
       <div className="grid g-2">
-        <DomainTable />
+        <DomainTable basis={basis} />
         <HardwareTable />
       </div>
     </div>
@@ -370,14 +415,16 @@ function EndLabel(props: { x?: number; y?: number; index?: number; n: number; te
   );
 }
 
-function TrendTip({ active, payload, label }: { active?: boolean; payload?: { payload: { vms: number; vcpu: number; vmsPct: number; vcpuPct: number } }[]; label?: string }) {
+function TrendTip({ active, payload, label }: { active?: boolean; payload?: { payload: ViewPoint }[]; label?: string }) {
   if (!active || !payload?.length) return null;
   const p = payload[0].payload;
   return (
     <div className="chart-tip">
       <div className="h">{label === 'Now' ? 'Today' : `End of ${label}`}</div>
-      <div className="r"><span><i className="dot" style={{ background: 'var(--line-vm)' }} /> VMs</span><b className="num">{fmt(p.vms)} · {p.vmsPct}%</b></div>
-      <div className="r"><span><i className="dot" style={{ background: 'var(--line-vcpu)' }} /> vCPU</span><b className="num">{fmt(p.vcpu)} · {p.vcpuPct}%</b></div>
+      <div className="r"><span><i className="dot" style={{ background: 'var(--line-vm)' }} /> VMs ({p.basis === 'risk' ? 'risk-adj.' : 'full plan'})</span><b className="num">{fmt(p.vms)} · {p.vmsPct}%</b></div>
+      <div className="r"><span><i className="dot" style={{ background: 'var(--line-vcpu)' }} /> vCPU ({p.basis === 'risk' ? 'risk-adj.' : 'full plan'})</span><b className="num">{fmt(p.vcpu)} · {p.vcpuPct}%</b></div>
+      <div className="r" style={{ borderTop: '1px solid var(--border)', marginTop: 4, paddingTop: 4 }}><span>{p.basis === 'risk' ? 'vCPU full plan' : 'vCPU risk-adjusted'}</span><b className="num">{fmt(p.basis === 'risk' ? p.vcpuPlan : p.vcpuRisk)}</b></div>
+      <div className="r"><span>vCPU committed</span><b className="num">{fmt(p.vcpuCommit)}</b></div>
     </div>
   );
 }
@@ -398,7 +445,7 @@ function ExitTip({ active, payload, label, metric }: { active?: boolean; payload
   );
 }
 
-function DomainTable() {
+function DomainTable({ basis }: { basis: Basis }) {
   const { inventory, plans, settings } = useStore();
   const vms = scopeVMs(inventory.vms, settings);
   const end = fyEnd(settings.horizonFY);
@@ -413,15 +460,15 @@ function DomainTable() {
       r.vcpu += v.vcpu;
       if (planFor(plans, v.appKey).disposition !== 'tbd') r.decided += v.vcpu;
     }
-    for (const r of m.values()) r.endVcpu = footprintAt(vms, plans, end, (v) => parseApp(v.appKey).domain === r.domain).vcpu;
+    for (const r of m.values()) r.endVcpu = footprintScenarios(vms, plans, end, settings.confidenceWeights, (v) => parseApp(v.appKey).domain === r.domain)[basis === 'risk' ? 'risk' : 'plan'].vcpu;
     return [...m.values()].sort((a, b) => b.vcpu - a.vcpu);
-  }, [vms, plans, end]);
+  }, [vms, plans, end, settings.confidenceWeights, basis]);
   return (
     <div className="card card-pad">
       <div className="card-head"><div><h2>Footprint by domain</h2><p className="sub">Domain parsed from Application_Primary</p></div></div>
       <div className="table-wrap" style={{ borderTop: 0 }}>
         <table className="t">
-          <thead><tr><th>Domain</th><th className="r">Apps</th><th className="r">VMs</th><th className="r">vCPU</th><th className="r">Decided</th><th className="r">vCPU end {fyLabel(settings.horizonFY)}</th></tr></thead>
+          <thead><tr><th>Domain</th><th className="r">Apps</th><th className="r">VMs</th><th className="r">vCPU</th><th className="r">Decided</th><th className="r">vCPU end {fyLabel(settings.horizonFY)} ({basis === 'risk' ? 'risk-adj.' : 'full plan'})</th></tr></thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.domain}>
@@ -471,7 +518,7 @@ function HardwareTable() {
           <tbody>
             {rows.map((r) => (
               <tr key={r.vendor}>
-                <td>{r.vendor === 'Cisco' ? 'Cisco HyperFlex' : r.vendor}</td>
+                <td>{VENDOR_LABEL[r.vendor as keyof typeof VENDOR_LABEL] ?? r.vendor}</td>
                 <td className="r num">{r.clusters}</td><td className="r num">{r.hosts}</td><td className="r num">{fmt(r.cores)}</td>
                 <td className="r num">{fmt(r.vms)}</td><td className="r num">{fmt(r.vcpu)}</td>
               </tr>
@@ -525,7 +572,7 @@ function UpcomingMoves() {
       {rows.length === 0 ? <div className="note">No applications scheduled yet.</div> : (
         <div className="table-wrap" style={{ borderTop: 0 }}>
           <table className="t">
-            <thead><tr><th>Quarter</th><th>Application</th><th>Domain</th><th>Treatment</th><th className="r">VMs</th><th className="r">vCPU</th><th>Notes</th></tr></thead>
+            <thead><tr><th>Quarter</th><th>Application</th><th>Domain</th><th>Treatment</th><th>Confidence</th><th className="r">VMs</th><th className="r">vCPU</th><th>Notes</th></tr></thead>
             <tbody>
               {shown.map(({ a, p }) => (
                 <tr key={a.key}>
@@ -533,6 +580,7 @@ function UpcomingMoves() {
                   <td><span className="app-name">{a.name}</span></td>
                   <td>{a.domain}</td>
                   <td><span className="chip"><i className="dot" style={{ background: DISP[p.disposition].color }} />{DISP[p.disposition].short}</span></td>
+                  <td><ConfChip c={p.confidence} /></td>
                   <td className="r num">{a.vmCount}</td>
                   <td className="r num">{fmt(a.vcpu)}</td>
                   <td className="muted">{p.notes}</td>
@@ -561,4 +609,32 @@ export function printSummary() {
   };
   window.addEventListener('afterprint', done);
   setTimeout(() => window.print(), 900);
+}
+
+function DeadlineNumbers({ sc, today, scope, basis }: { sc: Scenarios; today: { vcpu: number; vms: number }; scope: string; basis: Basis }) {
+  const head = basis === 'risk' ? sc.risk : sc.plan;
+  return (
+    <>
+      {scope}: <b className="num">{fmt(head.vcpu)}</b> vCPU / <b className="num">{fmt(head.vms)}</b> VMs {basis === 'risk' ? 'risk-adjusted' : 'full plan'}
+      <div className="note" style={{ marginTop: 2 }}>
+        {basis === 'risk' ? `Full plan ${fmt(sc.plan.vcpu)}` : `Risk-adjusted ${fmt(sc.risk.vcpu)}`} · committed {fmt(sc.committed.vcpu)} vCPU · today {fmt(today.vcpu)}
+      </div>
+    </>
+  );
+}
+
+function ConfChip({ c }: { c?: string }) {
+  const m = CONFIDENCE.find((x) => x.id === c);
+  if (!m) return <span className="chip" style={{ borderStyle: 'dashed' }}>Not rated</span>;
+  return <span className="chip"><i className="dot" style={{ background: m.color }} />{m.label}</span>;
+}
+
+type Basis = 'risk' | 'plan';
+type ViewPoint = TrendPoint & { basis: Basis; vmsRisk: number; vcpuRisk: number; altVms: number; altVcpu: number };
+
+/** Map a trend point onto the selected basis: vms/vcpu/pct become the headline series. */
+function toView(p: TrendPoint, basis: Basis): ViewPoint {
+  const risk = { vms: p.vms, vcpu: p.vcpu, vmsPct: p.vmsPct, vcpuPct: p.vcpuPct };
+  if (basis === 'risk') return { ...p, basis, vmsRisk: p.vms, vcpuRisk: p.vcpu, altVms: p.vmsPlan, altVcpu: p.vcpuPlan };
+  return { ...p, basis, vms: p.vmsPlan, vcpu: p.vcpuPlan, vmsPct: p.vmsPlanPct, vcpuPct: p.vcpuPlanPct, vmsRisk: risk.vms, vcpuRisk: risk.vcpu, altVms: risk.vms, altVcpu: risk.vcpu };
 }

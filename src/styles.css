@@ -29,6 +29,11 @@
   --s-tbd: #b9b8b0;
   --line-vm: #2a78d6;
   --line-vcpu: #eb6834;
+  /* confidence – ordinal blue ramp (validated) */
+  --c-high: #104281;
+  --c-med: #256abf;
+  --c-low: #5598e7;
+  --c-unk: #86b6ef;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -59,6 +64,10 @@
     --s-tbd: #5c5b55;
     --line-vm: #3987e5;
     --line-vcpu: #d95926;
+    --c-high: #9ec5f4;
+    --c-med: #5598e7;
+    --c-low: #2a78d6;
+    --c-unk: #184f95;
   }
 }
 :root[data-theme='dark'] {
@@ -88,6 +97,10 @@
   --s-tbd: #5c5b55;
   --line-vm: #3987e5;
   --line-vcpu: #d95926;
+  --c-high: #9ec5f4;
+  --c-med: #5598e7;
+  --c-low: #2a78d6;
+  --c-unk: #184f95;
 }
 
 * { box-sizing: border-box; }

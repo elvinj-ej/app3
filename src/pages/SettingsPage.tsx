@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react';
 import { defaultVendor, useStore, vendorOf } from '../lib/store';
 import { fyLabel } from '../lib/fy';
-import type { Deadline, HwVendor, PlanMap } from '../lib/types';
+import type { ConfidenceWeights, Deadline, HwVendor, PlanMap } from '../lib/types';
+import { DEFAULT_WEIGHTS } from '../lib/defaults';
 
 export default function SettingsPage() {
   const { inventory, settings, updateSettings, importPlans, toast } = useStore();
@@ -86,6 +87,8 @@ export default function SettingsPage() {
         </div>
       </div>
 
+      <WeightsCard />
+
       <div className="card card-pad" style={{ marginBottom: 16 }}>
         <div className="card-head">
           <div><h2>Deadlines</h2><p className="sub">Shown on the executive summary and marked on the timeline. Tick “confirmed” once the contract date is verified.</p></div>
@@ -106,7 +109,8 @@ export default function SettingsPage() {
                   <td>
                     <select className="select select-sm" value={d.kind} onChange={(e) => editDl(d.id, { kind: e.target.value as Deadline['kind'] })}>
                       <option value="VMware">VMware licence</option>
-                      <option value="Cisco">Cisco HW</option>
+                      <option value="Cisco">Cisco HyperFlex HW</option>
+                      <option value="FlashStack">Cisco FlashStack HW</option>
                       <option value="Lenovo">Lenovo HW</option>
                       <option value="Other">Other</option>
                     </select>
@@ -123,7 +127,7 @@ export default function SettingsPage() {
 
       <div className="card card-pad">
         <div className="card-head">
-          <div><h2>Cluster hardware vendor</h2><p className="sub">Default guess: clusters named “-HX-” are Cisco HyperFlex, the rest Lenovo. Used for the HW deadlines and hardware estate.</p></div>
+          <div><h2>Cluster hardware vendor</h2><p className="sub">Defaults: Equinix-Linux, Equinix-Windows, MacPark-CCTV, MacPark-Linux and MacPark-Windows are Cisco FlashStack; clusters named “-HX-” are Cisco HyperFlex; the rest Lenovo. Change any cluster here – used for the HW deadlines and hardware estate.</p></div>
         </div>
         {inventory.clusters.length === 0 ? (
           <div className="note">No Clusters sheet in the current inventory.</div>
@@ -147,6 +151,7 @@ export default function SettingsPage() {
                           updateSettings({ clusterVendor: next });
                         }}>
                         <option value="Cisco">Cisco HyperFlex</option>
+                        <option value="FlashStack">Cisco FlashStack</option>
                         <option value="Lenovo">Lenovo</option>
                         <option value="Other">Other</option>
                       </select>
@@ -157,6 +162,48 @@ export default function SettingsPage() {
             </table>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function WeightsCard() {
+  const { settings, updateSettings, toast } = useStore();
+  const [draft, setDraft] = useState<ConfidenceWeights | null>(null);
+  const w = draft ?? settings.confidenceWeights;
+  const rows: { k: keyof ConfidenceWeights; label: string; help: string }[] = [
+    { k: 'high', label: 'High', help: 'Committed – funded, owner agreed, path clear' },
+    { k: 'medium', label: 'Medium', help: 'Likely – plan agreed, some dependencies open' },
+    { k: 'low', label: 'Low', help: 'Possible – significant blockers or no funding yet' },
+    { k: 'unknown', label: 'Unknown', help: 'Assessed, but too early to say' },
+    { k: 'unrated', label: 'Not rated', help: 'No confidence chosen yet (blank)' },
+  ];
+  return (
+    <div className="card card-pad" style={{ marginBottom: 16 }}>
+      <div className="card-head">
+        <div><h2>Confidence weights</h2><p className="sub">Share of each scheduled workload counted as moved in the risk-adjusted forecast. “Committed” counts High only; “full plan” counts every scheduled move.</p></div>
+        <div className="filters">
+          {draft && <button className="btn btn-sm" onClick={() => setDraft(null)}>Discard</button>}
+          <button className="btn btn-sm" onClick={() => setDraft({ ...DEFAULT_WEIGHTS })}>Reset to 100 / 75 / 50 / 25</button>
+          <button className="btn btn-sm btn-primary" disabled={!draft} onClick={async () => { await updateSettings({ confidenceWeights: w }); setDraft(null); toast('Confidence weights saved'); }}>Save weights</button>
+        </div>
+      </div>
+      <div className="table-wrap">
+        <table className="t">
+          <thead><tr><th>Confidence</th><th>Counted as moved</th><th>Meaning (suggested)</th></tr></thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.k}>
+                <td><b>{r.label}</b></td>
+                <td>
+                  <input className="input select-sm" type="number" min={0} max={100} step={5} style={{ width: 80 }} value={w[r.k]}
+                    onChange={(e) => setDraft({ ...w, [r.k]: Math.max(0, Math.min(100, Number(e.target.value) || 0)) })} /> %
+                </td>
+                <td className="muted">{r.help}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
