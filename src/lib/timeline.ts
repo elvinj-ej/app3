@@ -10,6 +10,8 @@ export interface TimelineEntry {
   vcpu: number;
   q?: number;
   conf?: string;
+  /** pinned-cluster entries only */
+  clusters?: string[];
 }
 
 export interface Timeline {
@@ -45,10 +47,12 @@ export function buildTimeline(allVms: VM[], plans: PlanMap, settings: Settings):
     // Pinned VMs that would otherwise move (or are undecided) are listed under Sovereignty-bound by cluster.
     const held = a.vms.filter((v) => heldBySovereignty(v, p) || (v.pinned && m.group === 'Undecided'));
     for (const v of held) {
-      const e = pinned.get(v.location) ?? { key: `pin:${v.location}`, name: `Pinned cluster ${v.location}${sov[v.location] ? ` (${sov[v.location]})` : ''}`, vms: 0, vcpu: 0 };
+      const reason = sov[v.location] || 'Data sovereignty';
+      const e = pinned.get(reason) ?? { key: `pin:${reason}`, name: reason, vms: 0, vcpu: 0, clusters: [] as string[] };
       e.vms++;
       e.vcpu += v.vcpu;
-      pinned.set(v.location, e);
+      if (!e.clusters!.includes(v.location)) e.clusters!.push(v.location);
+      pinned.set(reason, e);
     }
     const rest = a.vms.filter((v) => !held.includes(v));
     if (!rest.length) continue;
@@ -59,7 +63,7 @@ export function buildTimeline(allVms: VM[], plans: PlanMap, settings: Settings):
     } else if (m.group === 'Retain') (stay[p.disposition] ??= []).push(e);
     else undecided.push(e);
   }
-  stay.retain_sovereignty = [...(stay.retain_sovereignty ?? []), ...pinned.values()];
+  stay.retain_sovereignty = [...(stay.retain_sovereignty ?? []), ...[...pinned.values()].map((e) => ({ ...e, name: `${e.name} – pinned clusters (${e.clusters!.sort().join(', ')})` }))];
   const virtVms = scopeVMs(allVms, settings).filter((v) => planFor(plans, v.appKey).disposition === 'virt_resource');
   const virt = groupApps(virtVms).map((a) => ({ key: a.key, name: a.name, vms: a.vmCount, vcpu: a.vcpu }));
   const bySize = (x: TimelineEntry, y: TimelineEntry) => y.vms - x.vms || x.name.localeCompare(y.name);

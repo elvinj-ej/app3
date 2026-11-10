@@ -4,7 +4,7 @@ import { fyLabel, fyOf, fyQuarterEnd, parseISODate, quarterLabel, quarterRange }
 import { byDisposition, exitDate, vmExitDate, heldBySovereignty, exitsBy, footprintScenarios, groupApps, periods, planFor, scopeVMs, totals, trend, whatStays } from '../src/lib/projection.ts';
 import { CONFIDENCE, CONFIDENCE_LABEL, VENDOR_LABEL, deadlineVendor, isOnExec, moveWeight, vendorOf } from '../src/lib/defaults.ts';
 import { addCharts, fitSheetsToWidth, type ChartDef } from './charts.ts';
-import { buildTimeline, sumVcpu, sumVms, type TimelineEntry } from '../src/lib/timeline.ts';
+import { buildTimeline, type TimelineEntry } from '../src/lib/timeline.ts';
 import { APP_NAME } from '../src/lib/brand.ts';
 import { parseApp } from '../src/lib/parse.ts';
 import type { AppRule, HistoryEntry, Inventory, PlanMap, Settings, UploadMeta } from '../src/lib/types.ts';
@@ -342,23 +342,45 @@ export async function buildTreatmentWorkbook(input: {
       series: [{ name: 'vCPU', valRef: rng('T', MIX.length), values: MIX.map((d) => disp.find((x) => x.id === d.id)!.vcpu), color: '2A78D6' }], at: pos(5) },
   ];
 
-  // ---------- Treatment timeline (treatment × FY matrix, like the dashboard) ----------
+  // ---------- Treatment timeline (treatment × FY matrix, application- and confidence-focused like the dashboard) ----------
   const tl = buildTimeline(allVms, plans, settings);
-  const cellText = (es: TimelineEntry[], withQ: boolean) =>
-    es.length ? `${es.map((e) => `${withQ && e.q ? `Q${e.q}  ` : ''}${e.name} – ${e.vms} VM${e.vms === 1 ? '' : 's'}${withQ && e.conf ? ` (${CONFIDENCE_LABEL[e.conf as keyof typeof CONFIDENCE_LABEL]})` : ''}`).join('\n')}\n\nTOTAL = ${sumVms(es)} VMs · ${Math.round(sumVcpu(es))} vCPU` : '–';
-  const tc = (v: string, extra: Partial<NonNullable<Cell>> = {}): Cell => ({ value: v, type: String, wrap: true, alignVertical: 'top', ...extra });
+  const CONF_FILL: Record<string, { bg: string; fg: string; label: string }> = {
+    high: { bg: '#D9F2D9', fg: '#0B5E0B', label: 'H' },
+    medium: { bg: '#FCEFC7', fg: '#7A5200', label: 'M' },
+    low: { bg: '#FCE3D8', fg: '#8A3A17', label: 'L' },
+    unknown: { bg: '#F7D6D6', fg: '#8E1F1F', label: 'U' },
+  };
+  const confRank = (c?: string) => { const i = ['high', 'medium', 'low', 'unknown'].indexOf(c ?? ''); return i < 0 ? 9 : i; };
+  const appCell = (e: TimelineEntry): Cell => {
+    const f = e.conf ? CONF_FILL[e.conf] : null;
+    return { value: `[${f ? f.label : '?'}] ${e.q ? `Q${e.q}  ` : ''}${e.name}`, type: String, backgroundColor: f ? f.bg : '#FFFFFF', color: f ? f.fg : '#52514E' };
+  };
+  const nCols = tl.cols.length;
+  const lab = (v: string, bg = '#F0EFEC'): Cell => ({ value: v, type: String, fontWeight: 'bold', backgroundColor: bg, wrap: true, alignVertical: 'top' });
   const tlRows: Row[] = [];
+  tlRows.push([lab('Confidence', '#FFFFFF'), ...(['high', 'medium', 'low', 'unknown'] as const).map((k) => ({ value: `[${CONF_FILL[k].label}] ${CONFIDENCE_LABEL[k]} · ${W8[k]}%`, type: String, backgroundColor: CONF_FILL[k].bg, color: CONF_FILL[k].fg } as Cell)), { value: '[?] Not rated', type: String, color: '#52514E' } as Cell, ...Array.from({ length: Math.max(0, nCols - 5) }, () => null)]);
+  tlRows.push([]);
   for (const d of DISPOSITIONS.filter((x) => x.leavesOnPrem)) {
-    const per = tl.move[d.id];
-    tlRows.push([tc(`${d.label}\n${per.reduce((x, es) => x + sumVms(es), 0)} VMs`, { fontWeight: 'bold', backgroundColor: '#F0EFEC' }), ...per.map((es) => tc(cellText(es, true)))]);
+    const per = tl.move[d.id].map((es) => [...es].sort((a, b) => (a.q ?? 9) - (b.q ?? 9) || confRank(a.conf) - confRank(b.conf) || a.name.localeCompare(b.name)));
+    const depth = Math.max(1, ...per.map((c) => c.length));
+    const total = per.reduce((x, c) => x + c.length, 0);
+    for (let r = 0; r < depth; r++) {
+      tlRows.push([r === 0 ? lab(`${d.label}\n${total} application${total === 1 ? '' : 's'}`) : lab(''), ...per.map((c) => (c[r] ? appCell(c[r]) : r === 0 ? S('–') : null))]);
+    }
+    tlRows.push([lab(''), ...per.map((c) => ({ value: c.length ? `${c.length} application${c.length === 1 ? '' : 's'}` : '', type: String, fontWeight: 'bold' } as Cell))]);
   }
-  tlRows.push([tc('Leaving on-prem', { fontWeight: 'bold', backgroundColor: '#E4EFFC' }), ...tl.cols.map((_, i) => tc(`${DISPOSITIONS.filter((x) => x.leavesOnPrem).reduce((x, d) => x + sumVms(tl.move[d.id][i]), 0)} VMs`, { fontWeight: 'bold', backgroundColor: '#E4EFFC' }))]);
-  const spanRow = (label: string, es: TimelineEntry[], bg = '#F0EFEC'): Row => [tc(label, { fontWeight: 'bold', backgroundColor: bg }), tc(cellText(es, false), { columnSpan: tl.cols.length }), ...tl.cols.slice(1).map(() => null)];
-  tlRows.push(spanRow('Sovereignty-bound (stays on-prem)', tl.stay.retain_sovereignty ?? []));
-  tlRows.push(spanRow('Latency-bound (stays on-prem)', tl.stay.retain_latency ?? []));
-  tlRows.push(spanRow('Stay – Maintain', tl.stay.retain_maintain ?? []));
-  if (tl.virt.length) tlRows.push(spanRow('Virtualization resources (excluded)', tl.virt));
-  tlRows.push(spanRow('Not yet decided', tl.undecided));
+  tlRows.push([lab('Applications leaving', '#E4EFFC'), ...tl.cols.map((_, i) => ({ value: DISPOSITIONS.filter((x) => x.leavesOnPrem).reduce((x, d) => x + tl.move[d.id][i].length, 0), type: Number, fontWeight: 'bold', backgroundColor: '#E4EFFC' } as Cell))]);
+  tlRows.push([]);
+  const spread = (label: string, es: TimelineEntry[]) => {
+    const names = [...es].sort((a, b) => a.name.localeCompare(b.name)).map((e) => e.name);
+    if (!names.length) { tlRows.push([lab(label), S('–')]); return; }
+    for (let r = 0; r * nCols < names.length; r++) tlRows.push([r === 0 ? lab(label) : lab(''), ...names.slice(r * nCols, r * nCols + nCols).map((n) => ({ value: n, type: String, backgroundColor: '#F0EFEC' } as Cell))]);
+  };
+  spread('Sovereignty-bound (stays on-prem)', tl.stay.retain_sovereignty ?? []);
+  spread('Latency-bound (stays on-prem)', tl.stay.retain_latency ?? []);
+  spread('Stay – Maintain', tl.stay.retain_maintain ?? []);
+  tlRows.push([lab('Not yet decided'), { value: `${tl.undecided.length} applications not yet decided`, type: String, fontWeight: 'bold' }]);
+  if (tl.virt.length) spread('Virtualization resources (excluded from the footprint)', tl.virt);
   const timelineSheet = sheet('Treatment timeline', ['Treatment', ...tl.cols], tlRows, [30, ...tl.cols.map(() => 34)]);
 
   const sheets = [execSheet, timelineSheet, treatment, roadmap, byQuarter, vmSheet, changeLog, uploadSheet, chartData];

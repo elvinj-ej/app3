@@ -50,6 +50,18 @@ HyperFlex management). Those VMs are left out of the footprint, the forecast and
 reference. **Domain corrections**: click the Domain cell in the planner to override the domain parsed from
 Application_Primary. Corrections are kept across uploads and logged in Activity.
 
+### Treatment timeline for executives (v2.10)
+
+The Executive Summary's treatment timeline is about applications and confidence, not VM counts:
+- Each application is a pill coloured by confidence: **green High, amber Medium, orange Low, red Unknown**, and a
+  grey dashed outline for not rated. Each pill also shows a letter and the target quarter.
+- Each cell shows "N applications" and a small RAG mix bar.
+- Hover an application for its VMs and vCPU.
+- Stay On-Prem rows list application names, and "Not yet decided" is a count.
+- The Excel *Treatment timeline* sheet uses the same layout, one application per cell coloured by confidence.
+
+The planner and the confidence card use the same RAG colours.
+
 ### vRAM and storage in the forecast (v2.9)
 
 The "Projected at end of FY…" card shows **vCPU, vRAM assigned and storage provisioned**. For each, it gives the reduction

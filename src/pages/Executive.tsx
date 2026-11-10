@@ -709,52 +709,70 @@ type MEntry = TimelineEntry;
 function TreatmentMatrix() {
   const { inventory, plans, settings } = useStore();
   const [open, setOpen] = useState<Set<string>>(new Set());
-
   const model = useMemo(() => buildTimeline(inventory.vms, plans, settings), [inventory, plans, settings]);
   const cols = model.cols;
+  const confRank = (c?: string) => { const i = CONFIDENCE.findIndex((x) => x.id === c); return i < 0 ? 9 : i; };
+  const apps = (es: MEntry[]) => {
+    const n = es.filter((e) => !e.clusters).length;
+    const pins = es.some((e) => e.clusters);
+    return `${n} application${n === 1 ? '' : 's'}${pins ? ' + pinned clusters' : ''}`;
+  };
 
-  const sum = (es: MEntry[]) => es.reduce((x, e) => x + e.vms, 0);
-  const List = ({ id, es, max = 8, showQ = true }: { id: string; es: MEntry[]; max?: number; showQ?: boolean }) => {
-    const sorted = [...es].sort((a, b) => b.vms - a.vms || a.name.localeCompare(b.name));
+  /** One application as a pill coloured by confidence (letter for print / colour-blind readers); VM detail on hover. */
+  const Pill = ({ e, timed }: { e: MEntry; timed: boolean }) => {
+    const c = CONFIDENCE.find((x) => x.id === e.conf);
+    const tip = `${e.name}${e.q ? ` · target Q${e.q}` : ''}${timed ? ` · ${c ? `${c.label} confidence` : 'confidence not rated'}` : ''} · ${e.vms} VM${e.vms === 1 ? '' : 's'}, ${fmt(e.vcpu)} vCPU`;
+    if (!timed) return <span className="pill neutral" title={tip}><span className="pn">{e.name}</span></span>;
+    return (
+      <span className={`pill${c ? '' : ' unrated'}`} style={c ? ({ '--pc': c.color } as React.CSSProperties) : undefined} title={tip}>
+        <span className="pl">{c ? c.label[0] : '?'}</span>
+        <span className="pn">{e.name}</span>
+        {e.q ? <span className="pq">Q{e.q}</span> : null}
+      </span>
+    );
+  };
+
+  const Cell = ({ id, es, timed, max = 10 }: { id: string; es: MEntry[]; timed: boolean; max?: number }) => {
+    if (!es.length) return <span className="muted">–</span>;
+    const sorted = timed ? [...es].sort((a, b) => (a.q ?? 9) - (b.q ?? 9) || confRank(a.conf) - confRank(b.conf) || a.name.localeCompare(b.name)) : [...es].sort((a, b) => a.name.localeCompare(b.name));
     const isOpen = open.has(id);
     const shown = isOpen ? sorted : sorted.slice(0, max);
-    if (!es.length) return <span className="muted">–</span>;
     return (
       <>
-        <ul className="mx-list">
-          {shown.map((e) => {
-            const c = CONFIDENCE.find((x) => x.id === e.conf);
-            return (
-              <li key={e.key} title={`${e.name} – ${e.vms} VMs, ${fmt(e.vcpu)} vCPU${c ? ` · ${c.label} confidence` : ''}`}>
-                {showQ && e.q ? <span className="mx-q">Q{e.q}</span> : null}
-                <span className="mx-name">{e.name} – {e.vms} VM{e.vms === 1 ? '' : 's'}</span>
-                {showQ && <i className="dot mx-conf" style={c ? { background: c.color } : { border: '1px dashed var(--border-strong)' }} />}
-              </li>
-            );
-          })}
-        </ul>
+        <div className="pills">{shown.map((e) => <Pill key={e.key} e={e} timed={timed} />)}</div>
         {sorted.length > max && (
           <button className="btn btn-sm mx-more" onClick={() => setOpen((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; })}>
-            {isOpen ? 'Show fewer' : `+ ${sorted.length - max} more (${sum(sorted.slice(max))} VMs)`}
+            {isOpen ? 'Show fewer' : `+ ${sorted.length - max} more`}
           </button>
         )}
-        <div className="mx-total">TOTAL = {fmt(sum(es))} VMs · {fmt(es.reduce((x, e) => x + e.vcpu, 0))} vCPU</div>
+        <div className="mx-count">{apps(es)}</div>
+        {timed && (
+          <div className="conf-bar" title={[...CONFIDENCE.map((c) => `${c.label}: ${es.filter((e) => e.conf === c.id).length}`), `Not rated: ${es.filter((e) => !e.conf).length}`].join(' · ')}>
+            {CONFIDENCE.map((c) => { const n = es.filter((e) => e.conf === c.id).length; return n ? <span key={c.id} style={{ flex: n, background: c.color }} /> : null; })}
+            {es.some((e) => !e.conf) && <span style={{ flex: es.filter((e) => !e.conf).length, background: 'var(--border-strong)' }} />}
+          </div>
+        )}
       </>
     );
   };
 
   const moveRows = DISPOSITIONS.filter((d) => d.leavesOnPrem);
   const stayRows = DISPOSITIONS.filter((d) => d.group === 'Retain');
-  const colTotals = cols.map((_, i) => moveRows.reduce((x, d) => x + sum(model.move[d.id][i]), 0));
+  const colTotals = cols.map((_, i) => moveRows.reduce((x, d) => x + model.move[d.id][i].length, 0));
 
   return (
     <div className="card card-pad" style={{ marginBottom: 16 }}>
       <div className="card-head">
         <div>
           <h2>Treatment timeline by financial year</h2>
-          <p className="sub">Applications by treatment and the FY they leave on-prem (Q = target quarter, dot = confidence). VM counts exclude VMs pinned by data sovereignty, which are listed under Sovereignty-bound.</p>
+          <p className="sub">Applications by treatment and the FY they leave on-prem, coloured by confidence (Q = target quarter). Hover an application for its VMs and vCPU.</p>
         </div>
         <a className="btn btn-sm" href="#/planner">Open planner</a>
+      </div>
+      <div className="conf-legend">
+        <b>Confidence:</b>
+        {CONFIDENCE.map((c) => <span key={c.id} className="pill" style={{ '--pc': c.color } as React.CSSProperties}><span className="pl">{c.label[0]}</span><span className="pn">{c.label} · {settings.confidenceWeights[c.id]}%</span></span>)}
+        <span className="pill unrated"><span className="pl">?</span><span className="pn">Not rated</span></span>
       </div>
       <div className="table-wrap" style={{ borderTop: 0 }}>
         <table className="mx">
@@ -764,29 +782,23 @@ function TreatmentMatrix() {
           <tbody>
             {moveRows.map((d) => (
               <tr key={d.id}>
-                <th className="mx-rowh" style={{ borderLeftColor: d.color }}>{d.label}<div className="mx-rowsum">{fmt(model.move[d.id].reduce((x, es) => x + sum(es), 0))} VMs</div></th>
-                {model.move[d.id].map((es, i) => <td key={i}><List id={`${d.id}:${i}`} es={es} /></td>)}
+                <th className="mx-rowh" style={{ borderLeftColor: d.color }}>{d.label}<div className="mx-rowsum">{apps(model.move[d.id].flat())}</div></th>
+                {model.move[d.id].map((es, i) => <td key={i}><Cell id={`${d.id}:${i}`} es={es} timed /></td>)}
               </tr>
             ))}
             <tr className="mx-foot">
-              <th className="mx-rowh">Leaving on-prem</th>
-              {colTotals.map((t, i) => <td key={i}><b className="num">{fmt(t)}</b> VMs</td>)}
+              <th className="mx-rowh">Applications leaving</th>
+              {colTotals.map((t, i) => <td key={i}><b className="num">{fmt(t)}</b></td>)}
             </tr>
             {stayRows.map((d) => (
               <tr key={d.id}>
                 <th className="mx-rowh" style={{ borderLeftColor: d.color }}>{d.id === 'retain_latency' ? 'Latency-bound' : d.id === 'retain_sovereignty' ? 'Sovereignty-bound' : 'Stay – Maintain'}<div className="mx-rowsum">stays on-prem</div></th>
-                <td colSpan={cols.length}><div className="mx-span"><List id={d.id} es={model.stay[d.id] ?? []} max={12} showQ={false} /></div></td>
+                <td colSpan={cols.length}><Cell id={d.id} es={model.stay[d.id] ?? []} timed={false} max={24} /></td>
               </tr>
             ))}
-            {model.virt.length > 0 && (
-              <tr className="mx-excluded">
-                <th className="mx-rowh">Virtualization resources<div className="mx-rowsum">excluded from the footprint</div></th>
-                <td colSpan={cols.length}><div className="mx-span"><List id="virt" es={model.virt} max={12} showQ={false} /></div></td>
-              </tr>
-            )}
             <tr>
               <th className="mx-rowh" style={{ borderLeftColor: 'var(--s-tbd)' }}>Not yet decided</th>
-              <td colSpan={cols.length}><div className="mx-span"><List id="tbd" es={model.undecided} max={10} showQ={false} /></div></td>
+              <td colSpan={cols.length}><b className="num">{fmt(model.undecided.length)}</b> applications not yet decided · <a href="#/planner">open the Application Planner</a></td>
             </tr>
           </tbody>
         </table>
