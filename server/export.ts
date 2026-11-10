@@ -171,9 +171,19 @@ export async function buildTreatmentWorkbook(input: {
 
   // Headline series follow the chosen basis; the "Plan" fields then hold the alternative scenario.
   const swap = (p: ReturnType<typeof trend>[number]) =>
-    isRisk ? p : { ...p, vms: p.vmsPlan, vcpu: p.vcpuPlan, vmsPct: p.vmsPlanPct, vcpuPct: p.vcpuPlanPct, vmsPlan: p.vms, vcpuPlan: p.vcpu, vmsPlanPct: p.vmsPct, vcpuPlanPct: p.vcpuPct };
-  const tq = trend(vms, plans, settings, 'quarter').map(swap);
-  const tf = trend(vms, plans, settings, 'fy').map(swap);
+    isRisk ? p : {
+      ...p,
+      vms: p.vmsPlan, vcpu: p.vcpuPlan, memGB: p.memPlan, storGB: p.storPlan,
+      vmsPct: p.vmsPlanPct, vcpuPct: p.vcpuPlanPct, memPct: p.memPlanPct, storPct: p.storPlanPct,
+      vmsPlan: p.vms, vcpuPlan: p.vcpu, memPlan: p.memGB, storPlan: p.storGB,
+      vmsPlanPct: p.vmsPct, vcpuPlanPct: p.vcpuPct, memPlanPct: p.memPct, storPlanPct: p.storPct,
+    };
+  // Storage counts every VM incl. powered-off (still on disk), as on the dashboard.
+  const storVms = scopeVMs(allVms, { ...settings, includePoweredOff: true }, plans);
+  const tq = trend(vms, plans, settings, 'quarter', storVms).map(swap);
+  const tf = trend(vms, plans, settings, 'fy', storVms).map(swap);
+  const endStor = footprintScenarios(storVms, plans, fyQuarterEnd(settings.horizonFY, 4), W8);
+  const TB = (gb: number) => Math.round((gb / 1024) * 10) / 10;
   const exitsC = exitsBy(vms, plans, settings, 'vcpu', 'quarter', isRisk);
   const disp = byDisposition(vms, plans);
 
@@ -182,7 +192,7 @@ export async function buildTreatmentWorkbook(input: {
   const rng = (col: string, n: number) => `${CD}!$${col}$2:$${col}$${n + 1}`;
   const leaveCols = ['L', 'M', 'N', 'O', 'P'];
   const cdHeader = ['Period', `VMs remaining (${bName})`, `vCPU remaining (${bName})`, 'VMs % of today', 'vCPU % of today', '', 'FY', 'VMs remaining', 'vCPU remaining', '', 'Quarter',
-    ...leaving.map((d) => `vCPU leaving – ${d.short}`), 'vCPU leaving – total', '', 'Treatment', 'vCPU', 'VMs', 'Apps', '', `vCPU – ${altName}`, 'vCPU – committed', `VMs – ${altName}`, 'VMs – committed'];
+    ...leaving.map((d) => `vCPU leaving – ${d.short}`), 'vCPU leaving – total', '', 'Treatment', 'vCPU', 'VMs', 'Apps', '', `vCPU – ${altName}`, 'vCPU – committed', `VMs – ${altName}`, 'VMs – committed', '', `vRAM % of today (${bName})`, `Storage % of today (${bName})`];
   const MIX = DISPOSITIONS.filter((d) => d.group !== 'Excluded');
   const nRows = Math.max(tq.length, tf.length, exitsC.length, MIX.length);
   const cdRows: Row[] = [];
@@ -194,10 +204,11 @@ export async function buildTreatmentWorkbook(input: {
       f ? S(f.label === 'Now' ? 'Now' : `End ${f.label}`) : null, f ? N(f.vms) : null, f ? N(f.vcpu) : null, null,
       e ? S(e.label) : null, ...leaving.map((d) => (e ? N(e[d.id] ?? 0) : null)), e ? N(e.total) : null, null,
       dm ? S(dm.label) : null, ds ? N(ds.vcpu) : null, ds ? N(ds.vms) : null, ds ? N(ds.apps) : null, null,
-      q ? N(q.vcpuPlan) : null, q ? N(q.vcpuCommit) : null, q ? N(q.vmsPlan) : null, q ? N(q.vmsCommit) : null,
+      q ? N(q.vcpuPlan) : null, q ? N(q.vcpuCommit) : null, q ? N(q.vmsPlan) : null, q ? N(q.vmsCommit) : null, null,
+      q ? N(q.memPct) : null, q ? N(q.storPct) : null,
     ]);
   }
-  const chartData = sheet('Chart data', cdHeader, cdRows, [12, 13, 13, 13, 13, 3, 12, 13, 13, 3, 11, ...leaving.map(() => 16), 16, 3, 30, 9, 9, 8, 3, 14, 14, 14, 14]);
+  const chartData = sheet('Chart data', cdHeader, cdRows, [12, 13, 13, 13, 13, 3, 12, 13, 13, 3, 11, ...leaving.map(() => 16), 16, 3, 30, 9, 9, 8, 3, 14, 14, 14, 14, 3, 16, 16]);
 
   const C = (v: unknown, extra: Partial<NonNullable<Cell>> = {}): Cell => (v === null || v === undefined ? null : { ...(typeof v === 'number' ? { value: v, type: Number, format: '#,##0' } : { value: String(v), type: String }), ...extra });
   const B = (v: string): Cell => ({ value: v, type: String, fontWeight: 'bold' });
@@ -209,8 +220,12 @@ export async function buildTreatmentWorkbook(input: {
   ex.push([TH('Key figures'), TH('Value')]);
   ex.push([C('VMs on-prem today'), N(base.vms)]);
   ex.push([C('vCPU on-prem today'), N(base.vcpu)]);
+  ex.push([C('vRAM assigned today (TB)'), { value: TB(base.memGB), type: Number, format: '#,##0.0' }]);
+  ex.push([C('Storage provisioned today (TB, all VMs)'), { value: TB(totals(storVms).storGB), type: Number, format: '#,##0.0' }]);
   ex.push([C(`VMs projected at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()})`), N(endT.vms)]);
   ex.push([C(`vCPU projected at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()})`), N(endT.vcpu)]);
+  ex.push([C(`vRAM projected at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()}, TB)`), { value: TB((isRisk ? endS.risk : endS.plan).memGB), type: Number, format: '#,##0.0' }]);
+  ex.push([C(`Storage projected at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()}, TB)`), { value: TB((isRisk ? endStor.risk : endStor.plan).storGB), type: Number, format: '#,##0.0' }]);
   ex.push([C(`vCPU at end of ${fyLabel(settings.horizonFY)} – full plan (all moves on time)`), N(endS.plan.vcpu)]);
   ex.push([C(`vCPU at end of ${fyLabel(settings.horizonFY)} – committed (High confidence only)`), N(endS.committed.vcpu)]);
   ex.push([C('vCPU reduction by horizon'), { value: base.vcpu ? (base.vcpu - endT.vcpu) / base.vcpu : 0, type: Number, format: '0%' }]);
@@ -300,10 +315,12 @@ export async function buildTreatmentWorkbook(input: {
   const COL = { vm: '2A78D6', vcpu: 'EB6834' };
   const SLOT: Record<string, string> = { retire: '2A78D6', saas: 'EB6834', modernize_aws: '1BAF7A', modernize_azure: 'EDA100', rehost_aws: 'E87BA4', retain_sovereignty: '008300', retain_latency: '6250D6', retain_maintain: 'E34948', tbd: 'B9B8B0' };
   const charts: ChartDef[] = [
-    { type: 'line', title: `On-prem footprint by quarter, ${bName.toLowerCase()} (% of today)`, catRef: rng('A', tq.length), categories: qCats, numFmt: '0"%"', yMax: 100,
+    { type: 'line', title: `On-prem footprint by quarter – VMs, vCPU, vRAM, storage, ${bName.toLowerCase()} (% of today)`, catRef: rng('A', tq.length), categories: qCats, numFmt: '0"%"', yMax: 100,
       series: [
         { name: 'VMs', valRef: rng('D', tq.length), values: tq.map((p) => p.vmsPct), color: COL.vm },
         { name: 'vCPU', valRef: rng('E', tq.length), values: tq.map((p) => p.vcpuPct), color: COL.vcpu },
+        { name: 'vRAM', valRef: rng('AC', tq.length), values: tq.map((p) => p.memPct), color: '1BAF7A' },
+        { name: 'Storage', valRef: rng('AD', tq.length), values: tq.map((p) => p.storPct), color: '6250D6' },
       ], at: pos(0) },
     { type: 'column', stacked: true, title: `vCPU leaving on-prem per quarter, by treatment (${bName.toLowerCase()})`, catRef: rng('K', exitsC.length), categories: exitsC.map((e) => e.label),
       series: leaving.map((d, i) => ({ name: d.short, valRef: rng(leaveCols[i], exitsC.length), values: exitsC.map((e) => Math.round((e[d.id] ?? 0) * 10) / 10), color: SLOT[d.id] })), at: pos(1) },

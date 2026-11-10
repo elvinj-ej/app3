@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-const VARS = ['--s1', '--s2', '--s3', '--s4', '--s5', '--s6', '--s7', '--s-tbd', '--line-vm', '--line-vcpu', '--grid', '--text-2', '--text-3', '--surface', '--border-strong'];
+const VARS = ['--s1', '--s2', '--s3', '--s4', '--s5', '--s6', '--s7', '--s-tbd', '--line-vm', '--line-vcpu', '--line-mem', '--line-stor', '--grid', '--text-2', '--text-3', '--surface', '--border-strong'];
 
 /** Resolve CSS custom properties to concrete colours for SVG charts; re-resolves on theme change. */
 export function useColors(): (cssVar: string) => string {

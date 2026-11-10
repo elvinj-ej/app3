@@ -46,16 +46,20 @@ export interface Totals {
   vms: number;
   vcpu: number;
   memGB: number;
+  /** Storage provisioned (GB) */
+  storGB: number;
 }
 
 export function totals(vms: VM[]): Totals {
   let vcpu = 0;
   let memGB = 0;
+  let storGB = 0;
   for (const v of vms) {
     vcpu += v.vcpu;
     memGB += v.memGB;
+    storGB += v.storageProvGB;
   }
-  return { vms: vms.length, vcpu, memGB };
+  return { vms: vms.length, vcpu, memGB, storGB };
 }
 
 export function footprintAt(vms: VM[], plans: PlanMap, at: Date, filter?: (v: VM) => boolean): Totals {
@@ -78,7 +82,7 @@ export interface Scenarios {
 
 /** On-prem footprint remaining at a date under the three confidence scenarios. */
 export function footprintScenarios(vms: VM[], plans: PlanMap, at: Date, weights: ConfidenceWeights = DEFAULT_WEIGHTS, filter?: (v: VM) => boolean): Scenarios {
-  const z = () => ({ vms: 0, vcpu: 0, memGB: 0 });
+  const z = () => ({ vms: 0, vcpu: 0, memGB: 0, storGB: 0 });
   const plan = z(), risk = z(), committed = z();
   for (const v of vms) {
     if (filter && !filter(v)) continue;
@@ -89,6 +93,7 @@ export function footprintScenarios(vms: VM[], plans: PlanMap, at: Date, weights:
       t.vms += f;
       t.vcpu += v.vcpu * f;
       t.memGB += v.memGB * f;
+      t.storGB += v.storageProvGB * f;
     };
     add(plan, gone ? 0 : 1);
     add(risk, gone ? 1 - moveWeight(p.confidence, weights) : 1);
@@ -132,37 +137,53 @@ export interface TrendPoint {
   /** Risk-adjusted (headline) */
   vms: number;
   vcpu: number;
+  memGB: number;
+  storGB: number;
   vmsPct: number;
   vcpuPct: number;
+  memPct: number;
+  storPct: number;
   /** Full plan (best case) and committed (High confidence only) */
   vmsPlan: number;
   vcpuPlan: number;
+  memPlan: number;
+  storPlan: number;
   vmsCommit: number;
   vcpuCommit: number;
+  memCommit: number;
+  storCommit: number;
   vmsPlanPct: number;
   vcpuPlanPct: number;
+  memPlanPct: number;
+  storPlanPct: number;
   vmsCommitPct: number;
   vcpuCommitPct: number;
 }
 
 const r1 = (n: number) => Math.round(n * 10) / 10;
 
-/** "Now" plus the projected on-prem footprint at the end of each period up to the horizon. */
-export function trend(vms: VM[], plans: PlanMap, settings: Settings, gran: Granularity = 'fy'): TrendPoint[] {
+/**
+ * "Now" plus the projected on-prem footprint at the end of each period up to the horizon.
+ * VMs / vCPU / vRAM come from `vms` (the footprint scope); storage from `storageVms` (default the same list) –
+ * the dashboard passes all VMs incl. powered-off, which still occupy disk.
+ */
+export function trend(vms: VM[], plans: PlanMap, settings: Settings, gran: Granularity = 'fy', storageVms: VM[] = vms): TrendPoint[] {
   const base = totals(vms);
+  const baseStor = totals(storageVms).storGB;
   const pct = (n: number, d: number) => (d ? r1((n / d) * 100) : 0);
-  const point = (label: string, sc: Scenarios): TrendPoint => ({
+  const w = settings.confidenceWeights ?? DEFAULT_WEIGHTS;
+  const point = (label: string, sc: Scenarios, st: Scenarios): TrendPoint => ({
     label,
-    vms: Math.round(sc.risk.vms), vcpu: Math.round(sc.risk.vcpu),
-    vmsPct: pct(sc.risk.vms, base.vms), vcpuPct: pct(sc.risk.vcpu, base.vcpu),
-    vmsPlan: sc.plan.vms, vcpuPlan: sc.plan.vcpu, vmsCommit: sc.committed.vms, vcpuCommit: sc.committed.vcpu,
-    vmsPlanPct: pct(sc.plan.vms, base.vms), vcpuPlanPct: pct(sc.plan.vcpu, base.vcpu),
+    vms: Math.round(sc.risk.vms), vcpu: Math.round(sc.risk.vcpu), memGB: Math.round(sc.risk.memGB), storGB: Math.round(st.risk.storGB),
+    vmsPct: pct(sc.risk.vms, base.vms), vcpuPct: pct(sc.risk.vcpu, base.vcpu), memPct: pct(sc.risk.memGB, base.memGB), storPct: pct(st.risk.storGB, baseStor),
+    vmsPlan: sc.plan.vms, vcpuPlan: sc.plan.vcpu, memPlan: Math.round(sc.plan.memGB), storPlan: Math.round(st.plan.storGB),
+    vmsCommit: sc.committed.vms, vcpuCommit: sc.committed.vcpu, memCommit: Math.round(sc.committed.memGB), storCommit: Math.round(st.committed.storGB),
+    vmsPlanPct: pct(sc.plan.vms, base.vms), vcpuPlanPct: pct(sc.plan.vcpu, base.vcpu), memPlanPct: pct(sc.plan.memGB, base.memGB), storPlanPct: pct(st.plan.storGB, baseStor),
     vmsCommitPct: pct(sc.committed.vms, base.vms), vcpuCommitPct: pct(sc.committed.vcpu, base.vcpu),
   });
-  const b = { vms: base.vms, vcpu: base.vcpu, memGB: base.memGB };
-  const pts: TrendPoint[] = [point('Now', { plan: b, risk: b, committed: b })];
-  const w = settings.confidenceWeights ?? DEFAULT_WEIGHTS;
-  for (const p of periods(settings, gran)) pts.push(point(p.label, footprintScenarios(vms, plans, p.end, w)));
+  const now = (t: Totals): Scenarios => ({ plan: t, risk: t, committed: t });
+  const pts: TrendPoint[] = [point('Now', now(base), now(totals(storageVms)))];
+  for (const p of periods(settings, gran)) pts.push(point(p.label, footprintScenarios(vms, plans, p.end, w), footprintScenarios(storageVms, plans, p.end, w)));
   return pts;
 }
 

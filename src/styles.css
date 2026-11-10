@@ -30,6 +30,8 @@
   --s-tbd: #b9b8b0;
   --line-vm: #2a78d6;
   --line-vcpu: #eb6834;
+  --line-mem: #1baf7a;
+  --line-stor: #6250d6;
   /* confidence – ordinal blue ramp (validated) */
   --c-high: #104281;
   --c-med: #256abf;
@@ -66,6 +68,8 @@
     --s-tbd: #5c5b55;
     --line-vm: #3987e5;
     --line-vcpu: #d95926;
+    --line-mem: #199e70;
+    --line-stor: #9085e9;
     --c-high: #9ec5f4;
     --c-med: #5598e7;
     --c-low: #2a78d6;
@@ -100,6 +104,8 @@
   --s-tbd: #5c5b55;
   --line-vm: #3987e5;
   --line-vcpu: #d95926;
+  --line-mem: #199e70;
+  --line-stor: #9085e9;
   --c-high: #9ec5f4;
   --c-med: #5598e7;
   --c-low: #2a78d6;
@@ -336,3 +342,10 @@ table.mx { width: 100%; border-collapse: separate; border-spacing: 0; font-size:
 .ms-dot { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: var(--text-3); color: #fff; font-size: 10.5px; font-weight: 700; font-style: normal; flex: none; }
 .legend .ms-dot { width: 14px; height: 14px; font-size: 9px; }
 .color-pick { width: 36px; height: 26px; padding: 0 2px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface); cursor: pointer; }
+
+/* ---------- projection card & 4 absolute charts ---------- */
+.proj-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 6px; }
+.proj-k { font-size: 12px; color: var(--text-2); font-weight: 600; }
+.proj-v { font-size: 22px; margin-top: 2px; }
+.abs-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 720px) { .proj-grid, .abs-grid { grid-template-columns: minmax(0, 1fr); } }

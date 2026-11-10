@@ -50,6 +50,14 @@ HyperFlex management). Those VMs are left out of the footprint, the forecast and
 reference. **Domain corrections**: click the Domain cell in the planner to override the domain parsed from
 Application_Primary. Corrections are kept across uploads and logged in Activity.
 
+### vRAM and storage in the forecast (v2.9)
+
+The "Projected at end of FY…" card shows **vCPU, vRAM assigned and storage provisioned**. For each, it gives the reduction
+against today plus the other scenario and the committed figure. The footprint chart's Indexed view has four lines
+(VMs, vCPU, vRAM, storage), and the Absolute view has four charts with the committed ↔ full plan range. Storage counts all
+VMs, including powered-off ones, as the Resources card does; VMs, vCPU and vRAM count powered-on VMs. The Excel key figures and
+percentage chart include vRAM and storage.
+
 ### Milestones on the Executive Summary (v2.8)
 
 In Settings › Deadlines, each milestone has these options:

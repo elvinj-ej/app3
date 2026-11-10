@@ -38,7 +38,9 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
 
   const vms = useMemo(() => scopeVMs(inventory.vms, settings, plans), [inventory, settings, plans]);
   const base = useMemo(() => totals(vms), [vms]);
-  const points = useMemo<ViewPoint[]>(() => trend(vms, plans, settings, gran).map((p) => toView(p, basis)), [vms, plans, settings, gran, basis]);
+  // Storage counts every VM incl. powered-off (they still occupy disk); VMs / vCPU / vRAM use the footprint scope.
+  const storVms = useMemo(() => scopeVMs(inventory.vms, { ...settings, includePoweredOff: true }, plans), [inventory, settings, plans]);
+  const points = useMemo<ViewPoint[]>(() => trend(vms, plans, settings, gran, storVms).map((p) => toView(p, basis)), [vms, plans, settings, gran, basis, storVms]);
   const exits = useMemo(() => exitsBy(vms, plans, settings, exitMetric, gran, isRisk), [vms, plans, settings, exitMetric, gran, isRisk]);
   const disp = useMemo(() => byDisposition(vms, plans), [vms, plans]);
   const apps = useMemo(() => groupApps(vms), [vms]);
@@ -79,10 +81,21 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
     }
     return [...m.entries()];
   }, [deadlines, points, gran]);
-  const absMax = {
-    vms: Math.max(1, ...points.map((p) => Math.max(p.vms, p.vmsPlan, p.vmsCommit))),
-    vcpu: Math.max(1, ...points.map((p) => Math.max(p.vcpu, p.vcpuPlan, p.vcpuCommit))),
-  };
+  const absMax = Object.fromEntries(METRICS.map((m) => [m.id, Math.max(1, ...points.map((p) => Math.max(p[m.val], p[m.plan], p[m.commit])))])) as Record<MetricId, number>;
+  // End labels on the indexed chart: spread so they never overlap (min ~6 percentage points apart).
+  const endOffsets = (() => {
+    const last = points[points.length - 1];
+    const order = METRICS.map((m) => ({ id: m.id, v: last ? last[m.pct] : 0 })).sort((a, b) => b.v - a.v);
+    const out: Record<string, number> = {};
+    let prev = Infinity;
+    for (const o of order) {
+      const adj = Math.min(o.v, prev - 6);
+      out[o.id] = o.v - adj;
+      prev = adj;
+    }
+    return out;
+  })();
+  const pxPerPct = (330 - 28 - (gran === 'quarter' ? 40 : 30) - 5) / 100;
   const xTick = gran === 'quarter' ? { tick: <QuarterTick fill={color('--text-2')} />, interval: 0, height: 40 } : {};
   const dotR = gran === 'quarter' ? 3 : 4;
 
@@ -161,16 +174,18 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
         </div>
         <div className="card kpi kpi-span2">
           <div className="k-label">Projected at end of {fyLabel(settings.horizonFY)} · {bLabel}</div>
-          <div className="k-value num">
-            {fmt(endPt.vcpu)}<small>vCPU</small>
+          <div className="proj-grid" title="Full plan = every scheduled move happens on its target quarter. Committed = only High-confidence moves happen.">
+            {METRICS.filter((m) => m.id !== 'vms').map((m) => (
+              <div key={m.id}>
+                <div className="proj-k">{m.id === 'vcpu' ? 'vCPU' : m.id === 'mem' ? 'vRAM assigned' : 'Storage provisioned'}</div>
+                <div className="k-value num proj-v">{m.format(endPt[m.val])}</div>
+                <div className="k-foot"><span className="delta-down">−{fmt(100 - endPt[m.pct])}%</span> vs today ({m.format(points[0][m.val])})</div>
+                <div className="k-foot">{isRisk ? 'Full plan' : 'Risk-adj.'} {m.format(isRisk ? endPt[m.plan] : endPt[m.risk])}</div>
+                <div className="k-foot">Committed {m.format(endPt[m.commit])}</div>
+              </div>
+            ))}
           </div>
-          <div className="k-foot">
-            {fmt(endPt.vms)} VMs ·{' '}
-            <span className="delta-down">−{fmt(100 - endPt.vcpuPct)}% vCPU</span>
-          </div>
-          <div className="k-foot" title="Full plan = every scheduled move happens on its target quarter. Committed = only High-confidence moves happen.">
-            {isRisk ? `Full plan ${fmt(endPt.vcpuPlan)}` : `Risk-adjusted ${fmt(endPt.vcpuRisk)}`} · committed {fmt(endPt.vcpuCommit)}
-          </div>
+          <div className="k-foot">{fmt(endPt.vms)} VMs remaining · <span className="delta-down">−{fmt(100 - endPt.vmsPct)}% VMs</span></div>
         </div>
         <div className="card kpi">
           <div className="k-label">Confidence of scheduled moves</div>
@@ -211,7 +226,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
               <h2>On-prem footprint by {gran === 'quarter' ? 'quarter' : 'financial year'}</h2>
               <p className="sub">
                 {mode === 'indexed'
-                  ? `${isRisk ? 'Risk-adjusted' : 'Full-plan'} VMs and vCPU remaining at the end of each ${gran === 'quarter' ? 'FY quarter' : 'FY'}, indexed to today = 100%. Hover for the other scenarios.`
+                  ? `${isRisk ? 'Risk-adjusted' : 'Full-plan'} VMs, vCPU, vRAM and storage remaining at the end of each ${gran === 'quarter' ? 'FY quarter' : 'FY'}, indexed to today = 100%. Hover for the other scenarios.`
                   : `${isRisk ? 'Risk-adjusted forecast' : 'Full plan'} (solid line) within the range from committed (High confidence only) to full plan (every move on its target quarter).`}
               </p>
             </div>
@@ -223,43 +238,44 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
           <div className="legend" style={{ marginBottom: 8 }}>
             <span><i className="ln" style={{ background: 'var(--line-vm)' }} /> VMs</span>
             <span><i className="ln" style={{ background: 'var(--line-vcpu)' }} /> vCPU</span>
-            {mode === 'absolute' && <span><i className="dot" style={{ background: 'var(--line-vm)', opacity: 0.18, width: 16 }} /> Range: committed ↔ full plan</span>}
+            <span><i className="ln" style={{ background: 'var(--line-mem)' }} /> vRAM</span>
+            <span><i className="ln" style={{ background: 'var(--line-stor)' }} /> Storage</span>
+            {mode === 'absolute' && <span><i className="dot" style={{ background: 'var(--text-3)', opacity: 0.25, width: 16 }} /> Range: committed ↔ full plan</span>}
             {mode === 'absolute' && <span><i className="ln" style={{ background: 'none', borderTop: '2px dashed var(--text-3)' }} /> {isRisk ? 'Full plan' : 'Risk-adjusted'}</span>}
             {refLines.length > 0 && <span><i className="ms-dot">1</i> Milestone – see Key deadlines (placed in the {gran === 'quarter' ? 'quarter' : 'FY'} it falls in)</span>}
             {refLines.some(([, ds]) => ds.some((d) => milestoneMarker(d) === 'line')) && <span><i className="ln" style={{ background: 'none', borderTop: '2px dotted var(--text-2)' }} /> Enterprise-wide milestone</span>}
           </div>
           {mode === 'indexed' ? (
             <ResponsiveContainer width="100%" height={330}>
-              <LineChart data={points} margin={{ top: 28, right: 96, left: 0, bottom: 0 }}>
+              <LineChart data={points} margin={{ top: 28, right: 128, left: 0, bottom: 0 }}>
                 <CartesianGrid vertical={false} stroke={color('--grid')} />
                 <XAxis dataKey="label" {...axisProps} {...xTick} />
                 <YAxis domain={[0, 100]} unit="%" {...axisProps} axisLine={false} width={48} />
                 <Tooltip content={<TrendTip />} cursor={{ stroke: color('--border-strong') }} />
                 {refs((k) => 6 + k * 9)}
-                <Line animationDuration={500} type="linear" dataKey="vmsPct" name="VMs" stroke={color('--line-vm')} strokeWidth={2}
-                  dot={{ r: dotR, strokeWidth: 2, stroke: color('--surface'), fill: color('--line-vm') }} activeDot={{ r: 6, strokeWidth: 2, stroke: color('--surface') }}
-                  label={<EndLabel n={points.length} field="vms" text="VMs" color={color('--text-2')} points={points} dy={-8} />} />
-                <Line animationDuration={500} type="linear" dataKey="vcpuPct" name="vCPU" stroke={color('--line-vcpu')} strokeWidth={2}
-                  dot={{ r: dotR, strokeWidth: 2, stroke: color('--surface'), fill: color('--line-vcpu') }} activeDot={{ r: 6, strokeWidth: 2, stroke: color('--surface') }}
-                  label={<EndLabel n={points.length} field="vcpu" text="vCPU" color={color('--text-2')} points={points} dy={14} />} />
+                {METRICS.map((m) => (
+                  <Line key={m.id} animationDuration={500} type="linear" dataKey={m.pct} name={m.label} stroke={color(m.cssVar)} strokeWidth={2}
+                    dot={{ r: dotR, strokeWidth: 2, stroke: color('--surface'), fill: color(m.cssVar) }} activeDot={{ r: 6, strokeWidth: 2, stroke: color('--surface') }}
+                    label={<EndLabel n={points.length} text={`${m.label} ${m.format(points[points.length - 1]?.[m.val] ?? 0)}`} color={color('--text-2')} dyPx={endOffsets[m.id] * pxPerPct} />} />
+                ))}
               </LineChart>
             </ResponsiveContainer>
           ) : (
-            <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}>
-              {(['vms', 'vcpu'] as const).map((f) => (
-                <div key={f}>
-                  <div className="note" style={{ fontWeight: 600, color: 'var(--text-2)' }}>{f === 'vms' ? 'VMs' : 'vCPU'}</div>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <ComposedChart data={points.map((p) => ({ ...p, band: f === 'vms' ? [p.vmsPlan, p.vmsCommit] : [p.vcpuPlan, p.vcpuCommit] }))} margin={{ top: 18, right: 16, left: 0, bottom: 0 }}>
+            <div className="grid abs-grid">
+              {METRICS.map((m) => (
+                <div key={m.id}>
+                  <div className="note" style={{ fontWeight: 600, color: 'var(--text-2)' }}>{m.id === 'mem' ? 'vRAM assigned' : m.id === 'stor' ? 'Storage provisioned' : m.label}</div>
+                  <ResponsiveContainer width="100%" height={260}>
+                    <ComposedChart data={points.map((p) => ({ ...p, _v: p[m.val] / m.div, _alt: p[m.alt] / m.div, band: [p[m.plan] / m.div, p[m.commit] / m.div] }))} margin={{ top: 18, right: 16, left: 0, bottom: 0 }}>
                       <CartesianGrid vertical={false} stroke={color('--grid')} />
                       <XAxis dataKey="label" {...axisProps} {...xTick} />
-                      <YAxis {...axisProps} axisLine={false} width={48} tickFormatter={(v) => fmt(v)} domain={[0, 'auto']} />
+                      <YAxis {...axisProps} axisLine={false} width={56} tickFormatter={(v) => m.tick(v)} domain={[0, 'auto']} />
                       <Tooltip content={<TrendTip />} cursor={{ stroke: color('--border-strong') }} />
-                      {refs((k) => absMax[f] * (0.07 + k * 0.11))}
-                      <Area animationDuration={500} type="linear" dataKey="band" stroke="none" fill={color(f === 'vms' ? '--line-vm' : '--line-vcpu')} fillOpacity={0.16} activeDot={false} />
-                      <Line animationDuration={500} type="linear" dataKey={f === 'vms' ? 'altVms' : 'altVcpu'} stroke={color('--text-3')} strokeWidth={1.5} strokeDasharray="4 3" dot={false} activeDot={false} />
-                      <Line animationDuration={500} type="linear" dataKey={f} stroke={color(f === 'vms' ? '--line-vm' : '--line-vcpu')} strokeWidth={2}
-                        dot={{ r: dotR, strokeWidth: 2, stroke: color('--surface'), fill: color(f === 'vms' ? '--line-vm' : '--line-vcpu') }} activeDot={{ r: 6 }} />
+                      {refs((k) => (absMax[m.id] / m.div) * (0.07 + k * 0.11))}
+                      <Area animationDuration={500} type="linear" dataKey="band" stroke="none" fill={color(m.cssVar)} fillOpacity={0.16} activeDot={false} />
+                      <Line animationDuration={500} type="linear" dataKey="_alt" stroke={color('--text-3')} strokeWidth={1.5} strokeDasharray="4 3" dot={false} activeDot={false} />
+                      <Line animationDuration={500} type="linear" dataKey="_v" stroke={color(m.cssVar)} strokeWidth={2}
+                        dot={{ r: dotR, strokeWidth: 2, stroke: color('--surface'), fill: color(m.cssVar) }} activeDot={{ r: 6 }} />
                     </ComposedChart>
                   </ResponsiveContainer>
                 </div>
@@ -270,14 +286,14 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
             <summary className="note" style={{ cursor: 'pointer' }}>Table view</summary>
             <table className="t" style={{ marginTop: 8 }}>
               <thead>
-                <tr><th>Point</th><th className="r">VMs ({bLabel})</th><th className="r">% of today</th><th className="r">vCPU ({bLabel})</th><th className="r">% of today</th><th className="r">vCPU risk-adjusted</th><th className="r">vCPU full plan</th><th className="r">vCPU committed</th></tr>
+                <tr><th>Point ({bLabel})</th>{METRICS.map((m) => <th key={m.id} className="r">{m.label}</th>)}{METRICS.map((m) => <th key={`p${m.id}`} className="r">{m.label} %</th>)}<th className="r">vCPU risk-adj.</th><th className="r">vCPU full plan</th><th className="r">vCPU committed</th></tr>
               </thead>
               <tbody>
                 {points.map((p) => (
                   <tr key={p.label}>
                     <td>{p.label === 'Now' ? 'Today' : `End of ${p.label}`}</td>
-                    <td className="r num">{fmt(p.vms)}</td><td className="r num">{p.vmsPct}%</td>
-                    <td className="r num">{fmt(p.vcpu)}</td><td className="r num">{p.vcpuPct}%</td>
+                    {METRICS.map((m) => <td key={m.id} className="r num">{m.format(p[m.val])}</td>)}
+                    {METRICS.map((m) => <td key={`p${m.id}`} className="r num">{p[m.pct]}%</td>)}
                     <td className="r num">{fmt(p.vcpuRisk)}</td><td className="r num">{fmt(p.vcpuPlan)}</td><td className="r num">{fmt(p.vcpuCommit)}</td>
                   </tr>
                 ))}
@@ -416,12 +432,12 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
   );
 }
 
-function EndLabel(props: { x?: number; y?: number; index?: number; n: number; text: string; color: string; points: { vms: number; vcpu: number }[]; field: 'vms' | 'vcpu'; dy: number }) {
-  const { x, y, index, n, text, color, points, field, dy } = props;
+function EndLabel(props: { x?: number; y?: number; index?: number; n: number; text: string; color: string; dyPx: number }) {
+  const { x, y, index, n, text, color, dyPx } = props;
   if (index !== n - 1 || x === undefined || y === undefined) return null;
   return (
-    <text x={x + 10} y={y + dy / 2} fill={color} fontSize={12} dominantBaseline="middle">
-      {text} {fmt(points[index][field])}
+    <text x={x + 10} y={y + dyPx} fill={color} fontSize={12} dominantBaseline="middle">
+      {text}
     </text>
   );
 }
@@ -434,6 +450,8 @@ function TrendTip({ active, payload, label }: { active?: boolean; payload?: { pa
       <div className="h">{label === 'Now' ? 'Today' : `End of ${label}`}</div>
       <div className="r"><span><i className="dot" style={{ background: 'var(--line-vm)' }} /> VMs ({p.basis === 'risk' ? 'risk-adj.' : 'full plan'})</span><b className="num">{fmt(p.vms)} · {p.vmsPct}%</b></div>
       <div className="r"><span><i className="dot" style={{ background: 'var(--line-vcpu)' }} /> vCPU ({p.basis === 'risk' ? 'risk-adj.' : 'full plan'})</span><b className="num">{fmt(p.vcpu)} · {p.vcpuPct}%</b></div>
+      <div className="r"><span><i className="dot" style={{ background: 'var(--line-mem)' }} /> vRAM</span><b className="num">{fmtTB(p.memGB)} · {p.memPct}%</b></div>
+      <div className="r"><span><i className="dot" style={{ background: 'var(--line-stor)' }} /> Storage</span><b className="num">{fmtTB(p.storGB)} · {p.storPct}%</b></div>
       <div className="r" style={{ borderTop: '1px solid var(--border)', marginTop: 4, paddingTop: 4 }}><span>{p.basis === 'risk' ? 'vCPU full plan' : 'vCPU risk-adjusted'}</span><b className="num">{fmt(p.basis === 'risk' ? p.vcpuPlan : p.vcpuRisk)}</b></div>
       <div className="r"><span>vCPU committed</span><b className="num">{fmt(p.vcpuCommit)}</b></div>
     </div>
@@ -577,14 +595,34 @@ function DeadlineNumbers({ sc, today, scope, basis }: { sc: Scenarios; today: { 
 
 
 type Basis = 'risk' | 'plan';
-type ViewPoint = TrendPoint & { basis: Basis; vmsRisk: number; vcpuRisk: number; altVms: number; altVcpu: number };
+type ViewPoint = TrendPoint & { basis: Basis; vmsRisk: number; vcpuRisk: number; memRisk: number; storRisk: number; altVms: number; altVcpu: number; altMem: number; altStor: number };
 
-/** Map a trend point onto the selected basis: vms/vcpu/pct become the headline series. */
+/** Map a trend point onto the selected basis: the headline fields become that scenario's values. */
 function toView(p: TrendPoint, basis: Basis): ViewPoint {
-  const risk = { vms: p.vms, vcpu: p.vcpu, vmsPct: p.vmsPct, vcpuPct: p.vcpuPct };
-  if (basis === 'risk') return { ...p, basis, vmsRisk: p.vms, vcpuRisk: p.vcpu, altVms: p.vmsPlan, altVcpu: p.vcpuPlan };
-  return { ...p, basis, vms: p.vmsPlan, vcpu: p.vcpuPlan, vmsPct: p.vmsPlanPct, vcpuPct: p.vcpuPlanPct, vmsRisk: risk.vms, vcpuRisk: risk.vcpu, altVms: risk.vms, altVcpu: risk.vcpu };
+  const risk = { vms: p.vms, vcpu: p.vcpu, memGB: p.memGB, storGB: p.storGB };
+  if (basis === 'risk') return { ...p, basis, vmsRisk: p.vms, vcpuRisk: p.vcpu, memRisk: p.memGB, storRisk: p.storGB, altVms: p.vmsPlan, altVcpu: p.vcpuPlan, altMem: p.memPlan, altStor: p.storPlan };
+  return {
+    ...p, basis,
+    vms: p.vmsPlan, vcpu: p.vcpuPlan, memGB: p.memPlan, storGB: p.storPlan,
+    vmsPct: p.vmsPlanPct, vcpuPct: p.vcpuPlanPct, memPct: p.memPlanPct, storPct: p.storPlanPct,
+    vmsRisk: risk.vms, vcpuRisk: risk.vcpu, memRisk: risk.memGB, storRisk: risk.storGB,
+    altVms: risk.vms, altVcpu: risk.vcpu, altMem: risk.memGB, altStor: risk.storGB,
+  };
 }
+
+/** GB shown as TB above 1,024 GB. */
+function fmtTB(gb: number): string {
+  return gb >= 1024 ? `${(gb / 1024).toLocaleString('en-AU', { maximumFractionDigits: 1 })} TB` : `${fmt(gb)} GB`;
+}
+
+type MetricId = 'vms' | 'vcpu' | 'mem' | 'stor';
+type NumKey = { [K in keyof ViewPoint]: ViewPoint[K] extends number ? K : never }[keyof ViewPoint];
+const METRICS: { id: MetricId; label: string; cssVar: string; val: NumKey; pct: NumKey; plan: NumKey; commit: NumKey; risk: NumKey; alt: NumKey; format: (n: number) => string; tick: (n: number) => string; div: number }[] = [
+  { id: 'vms', label: 'VMs', cssVar: '--line-vm', val: 'vms', pct: 'vmsPct', plan: 'vmsPlan', commit: 'vmsCommit', risk: 'vmsRisk', alt: 'altVms', format: fmt, tick: fmt, div: 1 },
+  { id: 'vcpu', label: 'vCPU', cssVar: '--line-vcpu', val: 'vcpu', pct: 'vcpuPct', plan: 'vcpuPlan', commit: 'vcpuCommit', risk: 'vcpuRisk', alt: 'altVcpu', format: fmt, tick: fmt, div: 1 },
+  { id: 'mem', label: 'vRAM', cssVar: '--line-mem', val: 'memGB', pct: 'memPct', plan: 'memPlan', commit: 'memCommit', risk: 'memRisk', alt: 'altMem', format: fmtTB, tick: (n) => `${fmt(n)} TB`, div: 1024 },
+  { id: 'stor', label: 'Storage', cssVar: '--line-stor', val: 'storGB', pct: 'storPct', plan: 'storPlan', commit: 'storCommit', risk: 'storRisk', alt: 'altStor', format: fmtTB, tick: (n) => `${fmt(n)} TB`, div: 1024 },
+];
 
 function WhatStaysCard({ basis }: { basis: Basis }) {
   const { inventory, plans, settings } = useStore();
