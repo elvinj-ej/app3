@@ -38,9 +38,8 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
 
   const vms = useMemo(() => scopeVMs(inventory.vms, settings, plans), [inventory, settings, plans]);
   const base = useMemo(() => totals(vms), [vms]);
-  // Storage counts every VM incl. powered-off (they still occupy disk); VMs / vCPU / vRAM use the footprint scope.
-  const storVms = useMemo(() => scopeVMs(inventory.vms, { ...settings, includePoweredOff: true }, plans), [inventory, settings, plans]);
-  const points = useMemo<ViewPoint[]>(() => trend(vms, plans, settings, gran, storVms).map((p) => toView(p, basis)), [vms, plans, settings, gran, basis, storVms]);
+  // VMs, vCPU, vRAM and storage all use the footprint scope (powered-on VMs unless the setting includes powered-off).
+  const points = useMemo<ViewPoint[]>(() => trend(vms, plans, settings, gran).map((p) => toView(p, basis)), [vms, plans, settings, gran, basis]);
   const exits = useMemo(() => exitsBy(vms, plans, settings, exitMetric, gran, isRisk), [vms, plans, settings, exitMetric, gran, isRisk]);
   const disp = useMemo(() => byDisposition(vms, plans), [vms, plans]);
   const apps = useMemo(() => groupApps(vms), [vms]);
@@ -672,16 +671,11 @@ function VmCountCard() {
 }
 
 function ResourcesCard({ vms }: { vms: { vcpu: number; memGB: number; storageProvGB: number; storageUsedGB: number; cpuAvgPct?: number; memAvgPct?: number }[] }) {
-  const { inventory, plans } = useStore();
   let vcpu = 0, vcpuUsed = 0, mem = 0, memUsed = 0, sp = 0, su = 0, haveUse = 0;
-  // Storage: every VM incl. powered-off (they still occupy disk); virtualization resources excluded.
-  for (const v of inventory.vms) {
-    if (planFor(plans, v.appKey).disposition === 'virt_resource') continue;
-    sp += v.storageProvGB; su += v.storageUsedGB;
-  }
-  // vCPU / vRAM: VMs in the footprint (powered-on unless the setting includes powered-off).
+  // All figures: VMs in the footprint (powered-on unless the setting includes powered-off; virtualization resources excluded).
   for (const v of vms) {
     vcpu += v.vcpu; mem += v.memGB;
+    sp += v.storageProvGB; su += v.storageUsedGB;
     if (v.cpuAvgPct !== undefined || v.memAvgPct !== undefined) haveUse++;
     vcpuUsed += (v.vcpu * (v.cpuAvgPct ?? 0)) / 100;
     memUsed += (v.memGB * (v.memAvgPct ?? 0)) / 100;
@@ -690,7 +684,7 @@ function ResourcesCard({ vms }: { vms: { vcpu: number; memGB: number; storagePro
   const rows = [
     { k: 'vCPU', a: fmt(vcpu), u: fmt(vcpuUsed), pct: vcpu ? vcpuUsed / vcpu : 0, help: '24-hour average CPU usage % (RVTools) × vCPU assigned – powered-on VMs' },
     { k: 'vRAM', a: tb(mem), u: tb(memUsed), pct: mem ? memUsed / mem : 0, help: '24-hour average memory usage % (RVTools) × vRAM assigned – powered-on VMs' },
-    { k: 'Storage', a: tb(sp), u: tb(su), pct: sp ? su / sp : 0, help: 'Storage Provisioned vs. Storage Used from RVTools – all VMs incl. powered-off' },
+    { k: 'Storage', a: tb(sp), u: tb(su), pct: sp ? su / sp : 0, help: 'Storage Provisioned vs. Storage Used from RVTools – powered-on VMs' },
   ];
   return (
     <div className="card kpi kpi-wide">
@@ -705,7 +699,7 @@ function ResourcesCard({ vms }: { vms: { vcpu: number; memGB: number; storagePro
           </div>
         ))}
       </div>
-      <div className="k-foot">{haveUse ? 'Used = 24-hour average utilisation % from the RVTools report × assigned (vCPU, vRAM; powered-on VMs). Storage used as reported, all VMs.' : 'Utilisation not available in this upload'}</div>
+      <div className="k-foot">{haveUse ? 'Powered-on VMs. Used = 24-hour average utilisation % from the RVTools report × assigned (vCPU, vRAM); storage used as reported.' : 'Utilisation not available in this upload'}</div>
     </div>
   );
 }

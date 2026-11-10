@@ -178,8 +178,8 @@ export async function buildTreatmentWorkbook(input: {
       vmsPlan: p.vms, vcpuPlan: p.vcpu, memPlan: p.memGB, storPlan: p.storGB,
       vmsPlanPct: p.vmsPct, vcpuPlanPct: p.vcpuPct, memPlanPct: p.memPct, storPlanPct: p.storPct,
     };
-  // Storage counts every VM incl. powered-off (still on disk), as on the dashboard.
-  const storVms = scopeVMs(allVms, { ...settings, includePoweredOff: true }, plans);
+  // Storage uses the same footprint scope as vCPU / vRAM (powered-on VMs unless the setting includes powered-off).
+  const storVms = vms;
   const tq = trend(vms, plans, settings, 'quarter', storVms).map(swap);
   const tf = trend(vms, plans, settings, 'fy', storVms).map(swap);
   const endStor = footprintScenarios(storVms, plans, fyQuarterEnd(settings.horizonFY, 4), W8);
@@ -221,7 +221,7 @@ export async function buildTreatmentWorkbook(input: {
   ex.push([C('VMs on-prem today'), N(base.vms)]);
   ex.push([C('vCPU on-prem today'), N(base.vcpu)]);
   ex.push([C('vRAM assigned today (TB)'), { value: TB(base.memGB), type: Number, format: '#,##0.0' }]);
-  ex.push([C('Storage provisioned today (TB, all VMs)'), { value: TB(totals(storVms).storGB), type: Number, format: '#,##0.0' }]);
+  ex.push([C('Storage provisioned today (TB)'), { value: TB(totals(storVms).storGB), type: Number, format: '#,##0.0' }]);
   ex.push([C(`VMs projected at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()})`), N(endT.vms)]);
   ex.push([C(`vCPU projected at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()})`), N(endT.vcpu)]);
   ex.push([C(`vRAM projected at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()}, TB)`), { value: TB((isRisk ? endS.risk : endS.plan).memGB), type: Number, format: '#,##0.0' }]);
