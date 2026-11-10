@@ -147,6 +147,8 @@ export function inventoryFromSheets(sheets: SheetData[], sourceFile: string): In
       memGB: num(get(row, 'Memory Assigned (GB)')),
       storageProvGB: num(get(row, 'Storage Provisioned (GB)')),
       storageUsedGB: num(get(row, 'Storage Used (GB)')),
+      createdDate: str(get(row, 'Creation Date')) || undefined,
+      buildUser: (str(get(row, 'Notes')).match(/Build User:\s*([^\n\r]+)/i)?.[1] ?? '').trim() || undefined,
       cpuAvgPct: optNum(get(row, 'CPU Usage Average %')),
       memAvgPct: optNum(get(row, 'MEM Usage Average %')),
     });

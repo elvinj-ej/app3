@@ -16,7 +16,12 @@ interface StateResponse {
   latestUpload: UploadMeta | null;
   uploadCount: number;
   rulesRev?: string;
+  staged?: StagedUpload[];
+  attention?: Attention | null;
 }
+
+export interface StagedUpload { id: number; filename: string; uploadedBy: string; uploadedAt: string }
+export interface Attention { uploadId: number; by: string; at: string; count: number; revert?: boolean }
 
 interface Toast {
   id: number;
@@ -39,6 +44,8 @@ interface Store {
   setPlans: (keys: string[], patch: Partial<AppPlan>) => Promise<void>;
   updateSettings: (patch: Partial<Settings>) => Promise<void>;
   uploadInventory: (file: File, note: string, force?: boolean) => Promise<UploadMeta>;
+  staged: StagedUpload[];
+  attention: Attention | null;
   renamePlan: (from: string, to: string) => Promise<void>;
   importPlans: (plans: PlanMap) => Promise<number>;
   refresh: () => Promise<void>;
@@ -77,6 +84,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
   const [rev, setRev] = useState(-1);
+  const [staged, setStaged] = useState<StagedUpload[]>([]);
+  const [attention, setAttention] = useState<Attention | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const invIdRef = useRef<string | null>(null);
   const revRef = useRef(-1);
@@ -92,6 +101,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setPlansState(s.plans);
     setSettings(s.settings);
     setLatestUpload(s.latestUpload);
+    setStaged(s.staged ?? []);
+    setAttention(s.attention ?? null);
     revRef.current = s.rev;
     setRev(s.rev);
     const latestId = s.latestUpload?.id ?? null;
@@ -196,7 +207,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const uploadInventory = useCallback(
     async (file: File, note: string, force = false) => {
-      const r = await api<{ upload: UploadMeta }>(`/uploads${force ? '?force=1' : ''}`, {
+      const r = await api<{ upload: UploadMeta; report: unknown }>(`/uploads${force ? '?force=1' : ''}`, {
         raw: file,
         headers: { 'x-filename': encodeURIComponent(file.name), 'x-note': encodeURIComponent(note) },
       });
@@ -229,9 +240,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       hasInventory: !!inventory,
       inventory: inventory ?? EMPTY_INV,
       latestUpload, plans, settings, rev,
-      setPlan, setPlans, updateSettings, uploadInventory, renamePlan, importPlans, refresh, toast, toasts,
+      setPlan, setPlans, updateSettings, uploadInventory, renamePlan, importPlans, refresh, toast, toasts, staged, attention,
     }),
-    [ready, connError, user, setUser, inventory, latestUpload, plans, settings, rev, setPlan, setPlans, updateSettings, uploadInventory, renamePlan, importPlans, refresh, toast, toasts],
+    [ready, connError, user, setUser, inventory, latestUpload, plans, settings, rev, setPlan, setPlans, updateSettings, uploadInventory, renamePlan, importPlans, refresh, toast, toasts, staged, attention],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useStore } from './lib/store';
+import { api } from './lib/api';
 import { fyLabel } from './lib/fy';
 import { APP_NAME } from './lib/brand';
 import Executive from './pages/Executive';
@@ -24,7 +25,7 @@ function readRoute(): Route {
 
 export default function App() {
   const [route, setRoute] = useState<Route>(readRoute);
-  const { ready, connError, user, setUser, hasInventory, latestUpload, settings, toasts } = useStore();
+  const { ready, connError, user, setUser, hasInventory, latestUpload, settings, toasts, staged, attention, refresh, toast } = useStore();
   const [editingName, setEditingName] = useState(false);
   const [theme, setTheme] = useState<string>(() => {
     try {
@@ -90,6 +91,24 @@ export default function App() {
           <div className="banner" style={{ marginBottom: 0, color: 'var(--crit)' }}>
             Cannot reach the server ({connError}). Changes will not be saved until the connection is back.
           </div>
+        </div>
+      )}
+
+      {ready && (staged.length > 0 || attention) && (
+        <div className="page" style={{ paddingBottom: 0 }}>
+          {staged.length > 0 && route !== 'inventory' && (
+            <div className="banner team-banner">
+              <b>Upload #{staged[0].id} ({staged[0].filename})</b> by {staged[0].uploadedBy} is awaiting review – the dashboards still show the current inventory.
+              <button className="btn btn-sm" onClick={() => go('inventory')}>Review changes</button>
+            </div>
+          )}
+          {attention && (
+            <div className="banner team-banner">
+              <span>Inventory upload <b>#{attention.uploadId}</b> was {attention.revert ? 'made current again' : 'made current'} by <b>{attention.by}</b> · <b>{attention.count}</b> item{attention.count === 1 ? '' : 's'} need attention.</span>
+              <button className="btn btn-sm" onClick={() => go('inventory')}>Open change report</button>
+              <button className="btn btn-sm" onClick={async () => { try { await api('/attention/clear', { json: {} }); await refresh(); toast('Marked as handled'); } catch (e) { toast(String(e), 'error'); } }}>Mark as handled</button>
+            </div>
+          )}
         </div>
       )}
 

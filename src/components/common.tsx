@@ -37,7 +37,7 @@ export function PlanChip({ p }: { p: Partial<AppPlan> | null | undefined }) {
   );
 }
 
-const ACTION_LABEL: Record<HistoryEntry['action'], string> = { update: 'Edited', bulk: 'Bulk edit', rename: 'Re-linked', import: 'Imported', rule: 'Mapping rule', delete: 'Decision removed', setting: 'Setting changed' };
+const ACTION_LABEL: Record<HistoryEntry['action'], string> = { update: 'Edited', bulk: 'Bulk edit', rename: 'Re-linked', import: 'Imported', rule: 'Mapping rule', delete: 'Decision removed', setting: 'Setting changed', inventory: 'Inventory update' };
 
 export function HistoryRow({ h, showApp }: { h: HistoryEntry; showApp?: boolean }) {
   return (
@@ -47,7 +47,7 @@ export function HistoryRow({ h, showApp }: { h: HistoryEntry; showApp?: boolean 
         <span className="muted" title={fmtDateTime(h.changedAt)}>{fmtDateTime(h.changedAt)}</span>
       </div>
       {showApp && <div className="app-name" style={{ marginTop: 2 }}>{h.appKey}</div>}
-      {h.action === 'rule' || h.action === 'setting' ? (
+      {h.action === 'rule' || h.action === 'setting' || h.action === 'inventory' ? (
         <div style={{ marginTop: 4 }} className="muted">{h.after?.notes}</div>
       ) : (
         <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>

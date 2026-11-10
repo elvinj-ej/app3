@@ -12,6 +12,7 @@ import { defaultSettings } from '../src/lib/defaults.ts';
 import { DISPOSITIONS } from '../src/lib/dispositions.ts';
 import { fyOf } from '../src/lib/fy.ts';
 import { applyRules } from '../src/lib/rules.ts';
+import { compareInventories } from '../src/lib/changes.ts';
 import { NO_APP } from '../src/lib/parse.ts';
 import type { AppPlan, Disposition, Inventory, Settings, UploadDiff } from '../src/lib/types.ts';
 
@@ -187,7 +188,12 @@ api.get('/rev', (_req, res) => res.json({ rev: store.rev() }));
 
 api.get('/state', (_req, res) => {
   const uploads = store.listUploads();
-  res.json({ rev: store.rev(), settings: fullSettings(), plans: store.getPlans(), latestUpload: uploads[0] ?? null, uploadCount: uploads.length, rulesRev: store.rulesRev() });
+  res.json({
+    rev: store.rev(), settings: fullSettings(), plans: store.getPlans(),
+    latestUpload: uploads.find((u) => u.isCurrent) ?? null, uploadCount: uploads.length, rulesRev: store.rulesRev(),
+    staged: uploads.filter((u) => u.status === 'staged').map((u) => ({ id: u.id, filename: u.filename, uploadedBy: u.uploadedBy, uploadedAt: u.uploadedAt })),
+    attention: store.attention(),
+  });
 });
 
 api.get('/inventory/latest', (_req, res) => {
@@ -387,13 +393,109 @@ api.post('/uploads', express.raw({ type: () => true, limit: '80mb' }), wrap(asyn
   const prevId = store.latestUploadId();
   const prev = prevId ? store.getInventory(prevId) : null;
   const diff = diffInventories(prev, inv);
-  const id = store.addUpload({
-    filename, uploadedBy: userOf(req), uploadedAt: new Date().toISOString(), note, sha256,
-    vmCount: inv.vms.length, poweredOn: inv.vms.filter((v) => v.poweredOn).length,
-    vcpu: inv.vms.reduce((s, v) => s + v.vcpu, 0), appCount: new Set(inv.vms.map((v) => v.appKey)).size,
-    clusterCount: inv.clusters.length, diff, inventory: inv, file: new Uint8Array(buf),
+  const user = userOf(req);
+  // Staged: compared with the current inventory and reviewed before anyone sees it on the dashboards.
+  const id = store.tx(() => {
+    const newId = store.addUpload({
+      filename, uploadedBy: user, uploadedAt: new Date().toISOString(), note, sha256,
+      vmCount: inv.vms.length, poweredOn: inv.vms.filter((v) => v.poweredOn).length,
+      vcpu: inv.vms.reduce((s, v) => s + v.vcpu, 0), appCount: new Set(inv.vms.map((v) => v.appKey)).size,
+      clusterCount: inv.clusters.length, diff, inventory: inv, file: new Uint8Array(buf), status: 'staged', baseUploadId: prevId,
+    });
+    store.saveReport(newId, compareInventories(prev, inv, store.getPlans(), fullSettings(), store.listRules(), { base: prevId, target: newId }));
+    store.logEvent(`Inventory upload #${newId}`, `Uploaded ${filename} – awaiting review${note ? ` · “${note}”` : ''}`, user, 'inventory');
+    return newId;
   });
-  res.json({ upload: store.listUploads().find((u) => u.id === id), rev: store.rev() });
+  res.json({ upload: store.listUploads().find((u) => u.id === id), report: store.getReport(id), rev: store.rev() });
+}));
+
+/** Report for an upload: the one saved at upload time, or computed against the confirmed upload before it. */
+function reportFor(id: number) {
+  const saved = store.getReport(id);
+  if (saved) return saved;
+  const inv = store.getInventory(id);
+  if (!inv) return null;
+  const prev = store.listUploads().filter((u) => u.id < id && u.status === 'confirmed').sort((a, b) => b.id - a.id)[0];
+  return compareInventories(prev ? store.getInventory(prev.id) : null, inv, store.getPlans(), fullSettings(), store.listRules(), { base: prev?.id ?? null, target: id });
+}
+
+api.get('/uploads/:id/report', (req, res) => {
+  const r = reportFor(Number(req.params.id));
+  if (!r) return res.status(404).json({ error: 'Not found' });
+  res.json(r);
+});
+
+api.get('/compare', (req, res) => {
+  const b = Number(req.query.base), t = Number(req.query.target);
+  const bi = store.getInventory(b), ti = store.getInventory(t);
+  if (!bi || !ti) return res.status(404).json({ error: 'Upload not found' });
+  res.json(compareInventories(bi, ti, store.getPlans(), fullSettings(), store.listRules(), { base: b, target: t }));
+});
+
+api.post('/uploads/:id/confirm', wrap((req, res) => {
+  const id = Number(req.params.id);
+  if (store.uploadStatus(id) !== 'staged') throw new HttpError(400, 'Only an upload awaiting review can be confirmed');
+  const user = userOf(req);
+  const note = String(req.body?.note ?? '').slice(0, 500);
+  // Re-check against today's data and plan (someone may have changed decisions since the upload).
+  const cur = store.latestUploadId();
+  const report = compareInventories(cur ? store.getInventory(cur) : null, store.getInventory(id)!, store.getPlans(), fullSettings(), store.listRules(), { base: cur, target: id });
+  store.tx(() => {
+    store.saveReport(id, report);
+    store.makeCurrent(id, user);
+    store.setAttention({ uploadId: id, by: user, at: new Date().toISOString(), count: report.attentionCount });
+    store.logEvent(`Inventory upload #${id}`, `Made current${note ? ` – “${note}”` : ''} · ${report.attentionCount} item(s) need attention`, user, 'inventory');
+  });
+  res.json({ ok: true, rev: store.rev() });
+}));
+
+api.post('/uploads/:id/discard', wrap((req, res) => {
+  const id = Number(req.params.id);
+  if (store.uploadStatus(id) !== 'staged') throw new HttpError(400, 'Only an upload awaiting review can be discarded');
+  store.tx(() => {
+    store.discardUpload(id);
+    store.logEvent(`Inventory upload #${id}`, 'Discarded without being made current', userOf(req), 'inventory');
+  });
+  res.json({ ok: true, rev: store.rev() });
+}));
+
+api.post('/uploads/:id/revert', wrap((req, res) => {
+  const id = Number(req.params.id);
+  if (store.uploadStatus(id) !== 'confirmed') throw new HttpError(400, 'Only a previously confirmed upload can be made current again');
+  const cur = store.latestUploadId();
+  if (cur === id) throw new HttpError(400, 'This upload is already current');
+  const user = userOf(req);
+  const report = compareInventories(cur ? store.getInventory(cur) : null, store.getInventory(id)!, store.getPlans(), fullSettings(), store.listRules(), { base: cur, target: id });
+  store.tx(() => {
+    store.makeCurrent(id, user);
+    store.setAttention({ uploadId: id, by: user, at: new Date().toISOString(), count: report.attentionCount, revert: true });
+    store.logEvent(`Inventory upload #${id}`, `Reverted to this upload (was #${cur})${req.body?.note ? ` – “${String(req.body.note).slice(0, 300)}”` : ''}`, user, 'inventory');
+  });
+  res.json({ ok: true, report, rev: store.rev() });
+}));
+
+api.post('/attention/clear', wrap((req, res) => {
+  store.tx(() => {
+    const a = store.attention();
+    store.clearAttention(userOf(req));
+    if (a) store.logEvent(`Inventory upload #${a.uploadId}`, 'Review items marked as handled', userOf(req), 'inventory');
+  });
+  res.json({ ok: true, rev: store.rev() });
+}));
+
+/** Parked decision from a merge: keep the merged application's decision (drop this one) or use this one instead. */
+api.post('/plans/resolve-parked', wrap((req, res) => {
+  const key = String(req.body?.key ?? '');
+  const use = req.body?.use;
+  const rule = store.listRules().find((r) => r.kind === 'merge' && r.source === key);
+  const p = store.getPlan(key);
+  if (!rule || !p) throw new HttpError(400, 'No parked decision from a merge for this application');
+  const user = userOf(req);
+  store.tx(() => {
+    if (use === 'this') store.writePlan(rule.target, cleanPlan(p), user, 'update');
+    store.deletePlan(key, user);
+  });
+  res.json({ ok: true, rev: store.rev() });
 }));
 
 api.get('/uploads/:id/file', (req, res) => {

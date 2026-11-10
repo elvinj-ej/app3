@@ -5,7 +5,7 @@ import type { AppPlan, AppRule, HistoryEntry, Inventory, PlanMap, Settings, Uplo
 
 export type SharedSettings = Omit<Settings, 'currentFY'>;
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export class Store {
   db: DatabaseSync;
@@ -74,7 +74,9 @@ export class Store {
     const hasRules = !!this.db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'app_rules'`).get();
     const ruleCols = hasRules ? (this.db.prepare(`PRAGMA table_info(app_rules)`).all() as { name: string }[]).map((c) => c.name) : [];
     const needCompCol = hasRules && !ruleCols.includes('keep_components');
-    if ((add.length || !hasRules || needCompCol) && this.existed) {
+    const upCols = (this.db.prepare(`PRAGMA table_info(uploads)`).all() as { name: string }[]).map((c) => c.name);
+    const upAdd: [string, string][] = ([['status', "TEXT NOT NULL DEFAULT 'confirmed'"], ['confirmed_by', 'TEXT'], ['confirmed_at', 'TEXT'], ['base_upload_id', 'INTEGER'], ['report_json', 'TEXT']] as [string, string][]).filter(([c]) => !upCols.includes(c));
+    if ((add.length || !hasRules || needCompCol || upAdd.length) && this.existed) {
       const dir = join(dirname(this.path), 'backups');
       mkdirSync(dir, { recursive: true });
       const dest = join(dir, `footprint-before-schema${SCHEMA_VERSION}-${new Date().toISOString().replace(/[:.]/g, '-')}.db`);
@@ -96,6 +98,9 @@ export class Store {
         UNIQUE(kind, source)
       )`);
       if (needCompCol) this.db.exec(`ALTER TABLE app_rules ADD COLUMN keep_components INTEGER NOT NULL DEFAULT 0`);
+      // Existing uploads were made current immediately in earlier versions: they count as confirmed by their uploader.
+      for (const [c, t] of upAdd) this.db.exec(`ALTER TABLE uploads ADD COLUMN ${c} ${t}`);
+      if (upAdd.some(([c]) => c === 'confirmed_by')) this.db.exec(`UPDATE uploads SET confirmed_by = uploaded_by, confirmed_at = uploaded_at WHERE confirmed_by IS NULL`);
       this.db.prepare(`INSERT INTO kv(key, value) VALUES('schema', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(String(SCHEMA_VERSION));
     });
   }
@@ -266,9 +271,27 @@ export class Store {
     this.bump();
   }
 
+  /** Team banner after an inventory change: shown to everyone until someone marks it handled. */
+  attention(): { uploadId: number; by: string; at: string; count: number; revert?: boolean } | null {
+    const r = this.db.prepare(`SELECT value FROM kv WHERE key = 'attention'`).get() as { value: string } | undefined;
+    if (!r) return null;
+    const a = JSON.parse(r.value);
+    return a.cleared ? null : a;
+  }
+  setAttention(a: { uploadId: number; by: string; at: string; count: number; revert?: boolean }) {
+    this.db.prepare(`INSERT INTO kv(key, value) VALUES('attention', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(JSON.stringify(a));
+    this.bump();
+  }
+  clearAttention(user: string) {
+    const a = this.attention();
+    if (!a) return;
+    this.db.prepare(`UPDATE kv SET value = ? WHERE key = 'attention'`).run(JSON.stringify({ ...a, cleared: true, clearedBy: user, clearedAt: new Date().toISOString() }));
+    this.bump();
+  }
+
   /** Record a non-decision event (e.g. a settings change) in the Activity log. */
-  logEvent(subject: string, text: string, user: string) {
-    this.addHistory(subject, 'setting', null, { notes: text }, user, new Date().toISOString());
+  logEvent(subject: string, text: string, user: string, action: 'setting' | 'inventory' = 'setting') {
+    this.addHistory(subject, action, null, { notes: text }, user, new Date().toISOString());
   }
 
   /** Remove a decision (kept in the change history). */
@@ -371,19 +394,60 @@ export class Store {
       appCount: Number(r.app_count),
       clusterCount: Number(r.cluster_count),
       diff: JSON.parse(String(r.diff_json)) as UploadDiff,
+      status: (r.status as UploadMeta['status']) ?? 'confirmed',
+      confirmedBy: r.confirmed_by ? String(r.confirmed_by) : undefined,
+      confirmedAt: r.confirmed_at ? String(r.confirmed_at) : undefined,
+      baseUploadId: r.base_upload_id == null ? null : Number(r.base_upload_id),
+      isCurrent: Number(r.id) === this.latestUploadId(),
+      attentionCount: r.report_json ? (JSON.parse(String(r.report_json)).attentionCount as number) : undefined,
     };
   }
 
   listUploads(): UploadMeta[] {
     const rows = this.db
-      .prepare(`SELECT id, filename, uploaded_by, uploaded_at, note, vm_count, powered_on, vcpu, app_count, cluster_count, diff_json FROM uploads ORDER BY id DESC`)
+      .prepare(`SELECT id, filename, uploaded_by, uploaded_at, note, vm_count, powered_on, vcpu, app_count, cluster_count, diff_json, status, confirmed_by, confirmed_at, base_upload_id, report_json FROM uploads ORDER BY id DESC`)
       .all() as Record<string, unknown>[];
     return rows.map((r) => this.rowToUpload(r));
   }
 
+  /** The upload that drives the dashboards: the one last made current, else the newest confirmed upload. */
   latestUploadId(): number | null {
-    const r = this.db.prepare(`SELECT MAX(id) AS id FROM uploads`).get() as { id: number | null };
+    const k = this.db.prepare(`SELECT value FROM kv WHERE key = 'current_upload_id'`).get() as { value: string } | undefined;
+    if (k) {
+      const ok = this.db.prepare(`SELECT id FROM uploads WHERE id = ? AND status = 'confirmed'`).get(Number(k.value));
+      if (ok) return Number(k.value);
+    }
+    const r = this.db.prepare(`SELECT MAX(id) AS id FROM uploads WHERE status = 'confirmed'`).get() as { id: number | null };
     return r.id ?? null;
+  }
+
+  uploadStatus(id: number): UploadMeta['status'] | null {
+    const r = this.db.prepare(`SELECT status FROM uploads WHERE id = ?`).get(id) as { status: string } | undefined;
+    return (r?.status as UploadMeta['status']) ?? null;
+  }
+
+  /** Make an upload the current inventory (confirming a staged one, or reverting to an earlier one). */
+  makeCurrent(id: number, user: string) {
+    const st = this.uploadStatus(id);
+    const now = new Date().toISOString();
+    if (st === 'staged') this.db.prepare(`UPDATE uploads SET status = 'confirmed', confirmed_by = ?, confirmed_at = ? WHERE id = ?`).run(user, now, id);
+    this.db.prepare(`INSERT INTO kv(key, value) VALUES('current_upload_id', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(String(id));
+    this.db.prepare(`INSERT INTO kv(key, value) VALUES('inv_rev', '1') ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1`).run();
+    this.bump();
+  }
+
+  discardUpload(id: number) {
+    this.db.prepare(`UPDATE uploads SET status = 'discarded' WHERE id = ? AND status = 'staged'`).run(id);
+    this.bump();
+  }
+
+  saveReport(id: number, report: unknown) {
+    this.db.prepare(`UPDATE uploads SET report_json = ? WHERE id = ?`).run(JSON.stringify(report), id);
+  }
+
+  getReport(id: number): unknown | null {
+    const r = this.db.prepare(`SELECT report_json FROM uploads WHERE id = ?`).get(id) as { report_json: string | null } | undefined;
+    return r?.report_json ? JSON.parse(r.report_json) : null;
   }
 
   getInventory(id: number): Inventory | null {
@@ -407,11 +471,11 @@ export class Store {
     const { vms, clusters } = u.inventory;
     const res = this.db
       .prepare(
-        `INSERT INTO uploads(filename, uploaded_by, uploaded_at, note, sha256, vm_count, powered_on, vcpu, app_count, cluster_count, diff_json, inventory_json, file)
-         VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO uploads(filename, uploaded_by, uploaded_at, note, sha256, vm_count, powered_on, vcpu, app_count, cluster_count, diff_json, inventory_json, file, status, base_upload_id)
+         VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(u.filename, u.uploadedBy, u.uploadedAt, u.note, u.sha256, u.vmCount, u.poweredOn, u.vcpu, u.appCount, u.clusterCount,
-        JSON.stringify(u.diff), JSON.stringify({ vms, clusters }), u.file);
+        JSON.stringify(u.diff), JSON.stringify({ vms, clusters }), u.file, u.status ?? 'staged', u.baseUploadId ?? null);
     this.bump();
     return Number(res.lastInsertRowid);
   }

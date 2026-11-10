@@ -14,6 +14,9 @@ export interface VM {
   memGB: number;
   storageProvGB: number;
   storageUsedGB: number;
+  /** From VMInfo: 'Creation Date' and 'Build User' in Notes (when present). */
+  createdDate?: string;
+  buildUser?: string;
   /** Average utilisation % from VMInfo (CPU Usage Average %, MEM Usage Average %); undefined if not in the file. */
   cpuAvgPct?: number;
   memAvgPct?: number;
@@ -69,12 +72,20 @@ export interface UploadMeta {
   appCount: number;
   clusterCount: number;
   diff: UploadDiff;
+  /** staged = uploaded, awaiting review; confirmed = has been made current at some point; discarded */
+  status?: 'staged' | 'confirmed' | 'discarded';
+  confirmedBy?: string;
+  confirmedAt?: string;
+  isCurrent?: boolean;
+  /** The upload this one was compared with when it was uploaded. */
+  baseUploadId?: number | null;
+  attentionCount?: number;
 }
 
 export interface HistoryEntry {
   id: number;
   appKey: string;
-  action: 'update' | 'bulk' | 'rename' | 'import' | 'rule' | 'delete' | 'setting';
+  action: 'update' | 'bulk' | 'rename' | 'import' | 'rule' | 'delete' | 'setting' | 'inventory';
   before: Partial<AppPlan> | null;
   after: Partial<AppPlan> | null;
   changedBy: string;

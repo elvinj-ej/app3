@@ -50,6 +50,27 @@ HyperFlex management). Those VMs are left out of the footprint, the forecast and
 reference. **Domain corrections**: click the Domain cell in the planner to override the domain parsed from
 Application_Primary. Corrections are kept across uploads and logged in Activity.
 
+### Reviewing a new VMInfo upload (v2.11)
+
+A new VMInfo file is **held for review** before it replaces the current inventory. The dashboards keep showing the
+current data, and everyone sees a banner that an upload is awaiting review. The review panel shows:
+
+- **Totals before → after** for powered-on VMs, vCPU, vRAM and storage, and the risk-adjusted vCPU at the end of the forecast FY.
+- **Needs attention**: new applications without a decision; decisions whose application left the file (parked); decided
+  applications whose footprint moved by **≥10% and ≥5 vCPU / 10 GB vRAM / 1 TB storage** (flagged if it grew while set
+  to Retire); new VMs in applications leaving on-prem; mapping-rule conflicts; VMs moved onto a data-sovereignty cluster.
+- **What changed in the file**: new, removed and probably renamed applications; new VMs (with creation date and build
+  user when known), removed VMs and changed VMs (vCPU, vRAM, storage, power, Application_Primary, environment, cluster, owner).
+- **Other effects**: projected vCPU at each deadline, mapping rules no longer needed, VMs moved off a sovereignty
+  cluster, and VMs moved to a cluster of another hardware vendor.
+
+Anyone can **Make current** (with a note) or **Discard** the upload. Once it is current, a banner shows who made it
+current and how many items need attention until someone marks it as handled. The upload history records who uploaded
+and who made each upload current; any earlier upload can be **made current again** (a revert), and any two uploads can
+be compared. Every step is logged in Activity as an *Inventory update*. The parked-decisions panel separates decisions
+**parked by a merge rule** (keep the merged application's decision or use this one) from applications **gone from the file**
+(re-link or remove).
+
 ### Treatment timeline for executives (v2.10)
 
 The Executive Summary's treatment timeline is about applications and confidence, not VM counts:

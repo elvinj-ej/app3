@@ -5,28 +5,35 @@ import { groupApps } from '../lib/projection';
 import { fmt } from '../lib/useColors';
 import { fmtDateTime, PlanChip } from '../components/common';
 import type { AppPlan, AppRule, RuleEffect, UploadMeta } from '../lib/types';
+import type { ChangeReport as Report } from '../lib/changes';
+import ChangeReport from '../components/ChangeReport';
 import { NO_APP } from '../lib/parse';
 
 export default function InventoryPage() {
-  const { inventory, hasInventory, plans, rev, uploadInventory, renamePlan, refresh, toast } = useStore();
+  const { inventory, hasInventory, plans, rev, uploadInventory, renamePlan, refresh, toast, staged } = useStore();
   const [uploads, setUploads] = useState<UploadMeta[] | null>(null);
+  const [rules, setRules] = useState<AppRule[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [over, setOver] = useState(false);
-  const [open, setOpen] = useState<number | null>(null);
-  const [result, setResult] = useState<UploadMeta | null>(null);
   const [dup, setDup] = useState<string | null>(null);
+  const [openReport, setOpenReport] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     api<UploadMeta[]>('/uploads').then(setUploads).catch(() => setUploads([]));
+    api<AppRule[]>('/rules').then(setRules).catch(() => setRules([]));
   }, [rev]);
 
   const apps = useMemo(() => groupApps(inventory.vms), [inventory]);
   const appKeys = useMemo(() => new Set(apps.map((a) => a.key)), [apps]);
   const orphans = hasInventory ? Object.entries(plans).filter(([k]) => !appKeys.has(k)) : [];
+  const mergeTarget = (k: string) => rules.find((r) => r.kind === 'merge' && r.source === k)?.target;
+  const parkedByMerge = orphans.filter(([k]) => mergeTarget(k));
+  const gone = orphans.filter(([k]) => !mergeTarget(k));
   const undecided = apps.filter((a) => !plans[a.key]).map((a) => a.key).sort();
+  const pending = staged[0];
 
   const submit = async (force = false) => {
     if (!file) return;
@@ -34,11 +41,10 @@ export default function InventoryPage() {
     setDup(null);
     try {
       const u = await uploadInventory(file, note, force);
-      setResult(u);
-      setOpen(u.id);
       setFile(null);
       setNote('');
-      toast(`Upload #${u.id} is now the current inventory`);
+      toast(`Upload #${u.id} is ready for review – check the changes, then make it current`);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) setDup(e.message);
       else toast(`Upload failed: ${e instanceof Error ? e.message : e}`, 'error');
@@ -47,107 +53,134 @@ export default function InventoryPage() {
     }
   };
 
+  const act = async (path: string, body: unknown, msg: string) => {
+    try {
+      await api(path, { json: body });
+      await refresh();
+      toast(msg);
+    } catch (e) {
+      toast(String(e instanceof Error ? e.message : e), 'error');
+    }
+  };
+
   return (
     <div className="page">
       <div className="page-head">
         <div>
           <h1>Inventory updates</h1>
-          <p>Upload each new VMInfo export here. Every upload is kept (who, when, the original file and what changed). The newest upload drives the dashboards; treatment decisions stay linked by <code>Application_Primary</code>.</p>
+          <p>Upload each new VMInfo export here. It is compared with the current data and <b>reviewed before it becomes current</b>. Every upload is kept with who uploaded and who confirmed it, the original file and a change report; any earlier upload can be made current again.</p>
         </div>
       </div>
 
+      {pending && <ReviewPanel id={pending.id} uploadedBy={pending.uploadedBy} uploadedAt={pending.uploadedAt} filename={pending.filename}
+        onConfirm={(n) => act(`/uploads/${pending.id}/confirm`, { note: n }, `Upload #${pending.id} is now the current inventory`)}
+        onDiscard={() => act(`/uploads/${pending.id}/discard`, {}, `Upload #${pending.id} discarded`)} />}
+
       <div className="grid g-2" style={{ marginBottom: 16 }}>
         <div className="card card-pad">
-          <div className="card-head"><div><h2>Upload latest VMInfo</h2><p className="sub">.xlsx with a <code>VMs</code> sheet (a <code>Clusters</code> sheet is optional)</p></div></div>
-          <div className={`dropzone${over ? ' over' : ''}`} role="button" tabIndex={0}
-            onClick={() => fileRef.current?.click()}
-            onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && fileRef.current?.click()}
-            onDragOver={(e) => { e.preventDefault(); setOver(true); }}
-            onDragLeave={() => setOver(false)}
-            onDrop={(e) => { e.preventDefault(); setOver(false); setFile(e.dataTransfer.files[0] ?? null); setDup(null); }}>
-            {file ? <><b>{file.name}</b> · {(file.size / 1024).toFixed(0)} KB</> : <><b>Drop the .xlsx here</b> or click to choose</>}
-          </div>
-          <input ref={fileRef} type="file" accept=".xlsx" hidden onChange={(e) => { setFile(e.target.files?.[0] ?? null); setDup(null); e.target.value = ''; }} />
-          <input className="input" style={{ width: '100%', marginTop: 10 }} placeholder="Note (optional) – e.g. 'Monthly export, Nov 2026'" value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} />
-          {dup && (
-            <div className="banner" style={{ marginTop: 10, marginBottom: 0 }}>
-              {dup}
-              <button className="btn btn-sm" onClick={() => submit(true)}>Upload anyway</button>
-            </div>
-          )}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
-            <button className="btn btn-primary" disabled={!file || busy} onClick={() => submit(false)}>{busy ? 'Uploading…' : 'Upload & make current'}</button>
-          </div>
-          {result && (
-            <p className="note" style={{ marginTop: 10 }}>
-              Upload #{result.id}: {fmt(result.vmCount)} VMs, {fmt(result.vcpu)} vCPU, {result.appCount} applications.
-              {result.diff.previousUploadId && <> Compared with #{result.diff.previousUploadId}: {signed(result.diff.vmDelta)} VMs, {signed(result.diff.vcpuDelta)} vCPU, {result.diff.appsAdded.length} new and {result.diff.appsRemoved.length} removed applications.</>}
-            </p>
+          <div className="card-head"><div><h2>Upload latest VMInfo</h2><p className="sub">.xlsx with a <code>VMs</code> sheet (a <code>Clusters</code> sheet is optional). You review the changes before it becomes current.</p></div></div>
+          {pending ? (
+            <div className="banner" style={{ marginBottom: 0 }}>Upload #{pending.id} is awaiting review above – make it current or discard it before uploading another file.</div>
+          ) : (
+            <>
+              <div className={`dropzone${over ? ' over' : ''}`} role="button" tabIndex={0}
+                onClick={() => fileRef.current?.click()}
+                onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && fileRef.current?.click()}
+                onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+                onDragLeave={() => setOver(false)}
+                onDrop={(e) => { e.preventDefault(); setOver(false); setFile(e.dataTransfer.files[0] ?? null); setDup(null); }}>
+                {file ? <><b>{file.name}</b> · {(file.size / 1024).toFixed(0)} KB</> : <><b>Drop the .xlsx here</b> or click to choose</>}
+              </div>
+              <input ref={fileRef} type="file" accept=".xlsx" hidden onChange={(e) => { setFile(e.target.files?.[0] ?? null); setDup(null); e.target.value = ''; }} />
+              <input className="input" style={{ width: '100%', marginTop: 10 }} placeholder="Note (optional) – e.g. 'Monthly export, Nov 2026'" value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} />
+              {dup && (
+                <div className="banner" style={{ marginTop: 10, marginBottom: 0 }}>
+                  {dup}
+                  <button className="btn btn-sm" onClick={() => submit(true)}>Upload anyway</button>
+                </div>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+                <button className="btn btn-primary" disabled={!file || busy} onClick={() => submit(false)}>{busy ? 'Comparing…' : 'Upload & review changes'}</button>
+              </div>
+            </>
           )}
         </div>
 
         <div className="card card-pad">
-          <div className="card-head">
-            <div><h2>Decisions without a matching application</h2>
-              <p className="sub">An application's name changed or it left the inventory. Re-link the decision to its new name, or leave it (it is kept, but no longer counted).</p></div>
-          </div>
+          <div className="card-head"><div><h2>Decisions without a matching application</h2><p className="sub">Decisions are never deleted silently – resolve them here.</p></div></div>
           {!hasInventory ? <div className="note">Upload an inventory first.</div> : orphans.length === 0 ? (
             <div className="note">All {Object.keys(plans).length} decisions match an application in the current inventory. ✓</div>
           ) : (
-            <div className="stack" style={{ gap: 0 }}>
-              {orphans.map(([k, p]) => <OrphanRow key={k} appKey={k} plan={<PlanChip p={p} />} options={undecided}
-                onRelink={async (to) => { try { await renamePlan(k, to); toast('Decision re-linked'); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); } }}
-                onRemove={async () => {
-                  if (!confirm(`Remove the decision for “${k}”? It stays in the change history.`)) return;
-                  try { await api(`/plans?key=${encodeURIComponent(k)}`, { method: 'DELETE' }); await refresh(); toast('Decision removed'); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
-                }} />)}
-            </div>
+            <>
+              {parkedByMerge.length > 0 && (
+                <>
+                  <div className="cr-group" style={{ marginTop: 0 }}>Parked by a merge <span className="cr-count warn">{parkedByMerge.length}</span></div>
+                  <p className="note" style={{ margin: '0 0 6px' }}>This application was merged into another that already had its own decision. Choose which decision the merged application keeps.</p>
+                  {parkedByMerge.map(([k, p]) => (
+                    <div className="hist-row" key={k}>
+                      <div className="app-name">{k}</div>
+                      <div className="muted" style={{ fontSize: 12, margin: '2px 0 4px' }}>merged into <b>{mergeTarget(k)}</b></div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 10px', alignItems: 'center', fontSize: 12.5 }}>
+                        <span className="muted">This decision</span><PlanChip p={p} />
+                        <span className="muted">Merged application</span><PlanChip p={plans[mergeTarget(k)!]} />
+                      </div>
+                      <div className="filters" style={{ marginTop: 6 }}>
+                        <button className="btn btn-sm" onClick={() => act('/plans/resolve-parked', { key: k, use: 'merged' }, 'Kept the merged application’s decision')}>Keep merged application’s decision</button>
+                        <button className="btn btn-sm" onClick={() => act('/plans/resolve-parked', { key: k, use: 'this' }, 'Merged application now uses this decision')}>Use this one instead</button>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
+              {gone.length > 0 && (
+                <>
+                  <div className="cr-group">Application gone from the file <span className="cr-count warn">{gone.length}</span></div>
+                  <p className="note" style={{ margin: '0 0 6px' }}>The name changed or it left the inventory. Re-link the decision to its new name, or remove it (kept in the change history).</p>
+                  {gone.map(([k, p]) => <OrphanRow key={k} appKey={k} plan={<PlanChip p={p} />} options={undecided}
+                    onRelink={async (to) => { try { await renamePlan(k, to); toast('Decision re-linked'); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); } }}
+                    onRemove={async () => {
+                      if (!confirm(`Remove the decision for “${k}”? It stays in the change history.`)) return;
+                      try { await api(`/plans?key=${encodeURIComponent(k)}`, { method: 'DELETE' }); await refresh(); toast('Decision removed'); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
+                    }} />)}
+                </>
+              )}
+            </>
           )}
         </div>
       </div>
 
       {hasInventory && <MappingRules />}
 
-      <div className="card">
-        <div className="card-pad" style={{ paddingBottom: 8 }}><h2>Upload history</h2></div>
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-pad" style={{ paddingBottom: 8 }}><h2>Upload history</h2><p className="sub">Open a change report, download the original file, or make an earlier upload current again.</p></div>
         <div className="table-wrap">
           <table className="t">
             <thead>
-              <tr><th>#</th><th>File</th><th>Uploaded by</th><th>When</th><th className="r">VMs</th><th className="r">vCPU</th><th className="r">Apps</th><th>Change vs previous</th><th>Note</th><th /></tr>
+              <tr><th>#</th><th>File</th><th>Status</th><th>Uploaded</th><th>Made current</th><th className="r">VMs</th><th className="r">vCPU</th><th className="r">Apps</th><th>Attention</th><th /></tr>
             </thead>
             <tbody>
-              {(uploads ?? []).map((u, i) => (
+              {(uploads ?? []).map((u) => (
                 <Fragment key={u.id}>
                   <tr>
-                    <td className="num">{u.id}{i === 0 && <span className="chip" style={{ marginLeft: 6 }}>current</span>}</td>
-                    <td>{u.filename}</td>
-                    <td>{u.uploadedBy}</td>
-                    <td className="muted">{fmtDateTime(u.uploadedAt)}</td>
+                    <td className="num">{u.id}</td>
+                    <td>{u.filename}{u.note && <div className="muted" style={{ fontSize: 12 }}>“{u.note}”</div>}</td>
+                    <td>{u.isCurrent ? <span className="chip" style={{ borderColor: 'var(--good)', color: 'var(--good)' }}>current</span> : u.status === 'staged' ? <span className="chip badge-warn">awaiting review</span> : u.status === 'discarded' ? <span className="chip">discarded</span> : <span className="chip">earlier</span>}</td>
+                    <td style={{ fontSize: 12.5 }}>{u.uploadedBy}<div className="muted">{fmtDateTime(u.uploadedAt)}</div></td>
+                    <td style={{ fontSize: 12.5 }}>{u.confirmedBy ? <>{u.confirmedBy}<div className="muted">{fmtDateTime(u.confirmedAt!)}</div></> : <span className="muted">—</span>}</td>
                     <td className="r num">{fmt(u.vmCount)}</td>
                     <td className="r num">{fmt(u.vcpu)}</td>
                     <td className="r num">{u.appCount}</td>
-                    <td>
-                      {u.diff.previousUploadId == null ? <span className="muted">first upload</span> : (
-                        <button className="btn btn-sm" onClick={() => setOpen(open === u.id ? null : u.id)} aria-expanded={open === u.id}>
-                          {signed(u.diff.vmDelta)} VMs · {signed(u.diff.vcpuDelta)} vCPU · {u.diff.appsAdded.length}+ / {u.diff.appsRemoved.length}− apps {open === u.id ? '▲' : '▼'}
-                        </button>
-                      )}
+                    <td>{u.attentionCount !== undefined ? <span className={`cr-count${u.attentionCount ? ' warn' : ''}`}>{u.attentionCount}</span> : <span className="muted">—</span>}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      <button className="btn btn-sm" onClick={() => setOpenReport(openReport === u.id ? null : u.id)} aria-expanded={openReport === u.id}>{openReport === u.id ? 'Hide report' : 'Change report'}</button>{' '}
+                      {u.status === 'confirmed' && !u.isCurrent && (
+                        <button className="btn btn-sm" onClick={() => { if (confirm(`Make upload #${u.id} (${u.filename}) the current inventory again? Decisions are not changed; this is logged in Activity.`)) act(`/uploads/${u.id}/revert`, {}, `Upload #${u.id} is current again`); }}>Make current</button>
+                      )}{' '}
+                      <a className="btn btn-sm" href={`api/uploads/${u.id}/file`}>Download</a>
                     </td>
-                    <td className="muted">{u.note}</td>
-                    <td><a className="btn btn-sm" href={`api/uploads/${u.id}/file`}>Download</a></td>
                   </tr>
-                  {open === u.id && u.diff.previousUploadId != null && (
-                    <tr className="sub">
-                      <td />
-                      <td colSpan={9}>
-                        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16, padding: '6px 0' }}>
-                          <DiffList title="New applications" cls="pill-add" items={u.diff.appsAdded.map((a) => `${a.key} (${a.vms} VMs, ${a.vcpu} vCPU)`)} />
-                          <DiffList title="Removed applications" cls="pill-rem" items={u.diff.appsRemoved.map((a) => `${a.key} (${a.vms} VMs, ${a.vcpu} vCPU)${a.hadDecision ? ' – had a decision' : ''}`)} />
-                          <DiffList title="New VMs" cls="pill-add" items={u.diff.vmsAdded} />
-                          <DiffList title="Removed VMs" cls="pill-rem" items={u.diff.vmsRemoved} />
-                        </div>
-                      </td>
-                    </tr>
+                  {openReport === u.id && (
+                    <tr className="sub"><td colSpan={10}><ReportLoader url={`/uploads/${u.id}/report`} title={`Change report – upload #${u.id}${u.baseUploadId ? ` compared with #${u.baseUploadId}` : ''}`} /></td></tr>
                   )}
                 </Fragment>
               ))}
@@ -156,19 +189,60 @@ export default function InventoryPage() {
           </table>
         </div>
       </div>
+
+      <CompareCard uploads={(uploads ?? []).filter((u) => u.status === 'confirmed')} />
     </div>
   );
 }
 
-function signed(n: number) {
-  return `${n > 0 ? '+' : n < 0 ? '−' : '±'}${fmt(Math.abs(n))}`;
+function ReportLoader({ url, title }: { url: string; title: string }) {
+  const [r, setR] = useState<Report | null>(null);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    setR(null);
+    api<Report>(url).then(setR).catch((e) => setErr(String(e instanceof Error ? e.message : e)));
+  }, [url]);
+  if (err) return <div className="note">{err}</div>;
+  if (!r) return <div className="note">Comparing…</div>;
+  return <ChangeReport r={r} title={title} />;
 }
 
-function DiffList({ title, items, cls }: { title: string; items: string[]; cls: string }) {
+function ReviewPanel({ id, filename, uploadedBy, uploadedAt, onConfirm, onDiscard }: { id: number; filename: string; uploadedBy: string; uploadedAt: string; onConfirm: (note: string) => void; onDiscard: () => void }) {
+  const [note, setNote] = useState('');
   return (
-    <div>
-      <div><span className={cls}>{items.length}</span> {title}</div>
-      {items.length > 0 && <ul className="diff-list">{items.slice(0, 300).map((x) => <li key={x}>{x}</li>)}{items.length > 300 && <li>… {items.length - 300} more</li>}</ul>}
+    <div className="card card-pad review-panel" style={{ marginBottom: 16 }}>
+      <div className="card-head">
+        <div>
+          <h2>Review upload #{id} before it becomes current</h2>
+          <p className="sub"><b>{filename}</b> · uploaded by {uploadedBy}, {fmtDateTime(uploadedAt)}. Nothing on the dashboards changes until it is made current.</p>
+        </div>
+      </div>
+      <ReportLoader url={`/uploads/${id}/report`} title="" />
+      <div className="filters" style={{ marginTop: 12, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+        <input className="input" style={{ flex: 1, minWidth: 240, width: 'auto' }} placeholder="Note for the record (optional) – e.g. 'Checked with Hosting team'" value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} />
+        <button className="btn btn-danger" onClick={() => { if (confirm(`Discard upload #${id}? The current inventory stays as it is.`)) onDiscard(); }}>Discard</button>
+        <button className="btn btn-primary" onClick={() => onConfirm(note)}>Make current</button>
+      </div>
+    </div>
+  );
+}
+
+function CompareCard({ uploads }: { uploads: UploadMeta[] }) {
+  const [base, setBase] = useState('');
+  const [target, setTarget] = useState('');
+  const [go, setGo] = useState<string | null>(null);
+  if (uploads.length < 2) return null;
+  const opt = (u: UploadMeta) => <option key={u.id} value={u.id}>#{u.id} · {u.filename} · {fmtDateTime(u.uploadedAt)}{u.isCurrent ? ' (current)' : ''}</option>;
+  return (
+    <div className="card card-pad">
+      <div className="card-head"><div><h2>Compare any two uploads</h2><p className="sub">Shows what changed between them and the effect on today’s plan.</p></div></div>
+      <div className="filters">
+        <select className="select" value={base} onChange={(e) => setBase(e.target.value)} aria-label="Compare from"><option value="">From…</option>{uploads.map(opt)}</select>
+        <span className="muted">→</span>
+        <select className="select" value={target} onChange={(e) => setTarget(e.target.value)} aria-label="Compare to"><option value="">To…</option>{uploads.map(opt)}</select>
+        <button className="btn btn-sm btn-primary" disabled={!base || !target || base === target} onClick={() => setGo(`/compare?base=${base}&target=${target}`)}>Compare</button>
+      </div>
+      {go && <div style={{ marginTop: 12 }}><ReportLoader url={go} title={`Upload #${base} → #${target}`} /></div>}
     </div>
   );
 }
