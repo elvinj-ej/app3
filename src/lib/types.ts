@@ -128,6 +128,12 @@ export interface Deadline {
   kind: 'VMware' | 'Cisco' | 'FlashStack' | 'Lenovo' | 'GoLive' | 'DressRehearsal' | 'Other';
   confirmed: boolean;
   note?: string;
+  /** Shown on the Executive Summary (default true). */
+  showOnExec?: boolean;
+  /** Marker colour on the timeline chart (hex); default picked from the milestone palette. */
+  color?: string;
+  /** 'dot' (default) or 'line' – a dotted vertical line for enterprise-wide milestones (default for Go-Live). */
+  marker?: 'dot' | 'line';
 }
 
 export interface Settings {

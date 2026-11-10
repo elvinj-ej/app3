@@ -50,6 +50,16 @@ HyperFlex management). Those VMs are left out of the footprint, the forecast and
 reference. **Domain corrections**: click the Domain cell in the planner to override the domain parsed from
 Application_Primary. Corrections are kept across uploads and logged in Activity.
 
+### Milestones on the Executive Summary (v2.8)
+
+In Settings › Deadlines, each milestone has these options:
+- **On Exec Summary**: whether leadership sees it in Key deadlines, the "Next deadline" card, the chart and the Excel export.
+- **Colour**: chosen with a colour picker.
+- **Shown as**: *Dot*, a numbered dot just above the time axis, or *Dotted line*, for enterprise-wide milestones (Go-Live
+  milestones default to this).
+
+The number and colour on the chart match the badge in the Key deadlines list on the right, which is numbered by date.
+
 ### Confidence and the risk-adjusted forecast
 
 For each application that leaves on-prem, the planner records a **confidence**: High, Medium, Low or Unknown. It is

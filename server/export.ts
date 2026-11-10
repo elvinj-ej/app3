@@ -2,7 +2,7 @@ import writeExcelFile from 'write-excel-file/node';
 import { DISPOSITIONS, dispMeta } from '../src/lib/dispositions.ts';
 import { fyLabel, fyOf, fyQuarterEnd, parseISODate, quarterLabel, quarterRange } from '../src/lib/fy.ts';
 import { byDisposition, exitDate, vmExitDate, heldBySovereignty, exitsBy, footprintScenarios, groupApps, periods, planFor, scopeVMs, totals, trend, whatStays } from '../src/lib/projection.ts';
-import { CONFIDENCE, CONFIDENCE_LABEL, VENDOR_LABEL, deadlineVendor, moveWeight, vendorOf } from '../src/lib/defaults.ts';
+import { CONFIDENCE, CONFIDENCE_LABEL, VENDOR_LABEL, deadlineVendor, isOnExec, moveWeight, vendorOf } from '../src/lib/defaults.ts';
 import { addCharts, fitSheetsToWidth, type ChartDef } from './charts.ts';
 import { buildTimeline, sumVcpu, sumVms, type TimelineEntry } from '../src/lib/timeline.ts';
 import { APP_NAME } from '../src/lib/brand.ts';
@@ -218,7 +218,7 @@ export async function buildTreatmentWorkbook(input: {
   ex.push([C('Share of vCPU with a decision'), { value: base.vcpu ? decidedVcpu / base.vcpu : 0, type: Number, format: '0%' }]);
   ex.push([]);
   ex.push([TH('Deadline'), TH('Date'), TH('Status'), TH('VMs risk-adj.'), TH('vCPU risk-adj.'), TH('vCPU full plan'), TH('vCPU committed')]);
-  for (const d of [...settings.deadlines].sort((a, b) => a.date.localeCompare(b.date))) {
+  for (const d of settings.deadlines.filter(isOnExec).sort((a, b) => a.date.localeCompare(b.date))) {
     const at = parseISODate(d.date);
     const vendor = deadlineVendor(d.kind);
     const fp = footprintScenarios(vms, plans, at, W8, vendor ? (v) => vendorOf(settings, v.location) === vendor : undefined);

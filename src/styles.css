@@ -331,3 +331,8 @@ table.mx { width: 100%; border-collapse: separate; border-spacing: 0; font-size:
 
 .t tr.sub.comp td { background: var(--surface-2); }
 .t tr.sub.comp + tr.sub td:nth-child(3), .t tr.sub.comp ~ tr.sub:not(.comp) td:nth-child(3) { padding-left: 22px; }
+
+/* ---------- milestone markers ---------- */
+.ms-dot { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: var(--text-3); color: #fff; font-size: 10.5px; font-weight: 700; font-style: normal; flex: none; }
+.legend .ms-dot { width: 14px; height: 14px; font-size: 9px; }
+.color-pick { width: 36px; height: 26px; padding: 0 2px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface); cursor: pointer; }

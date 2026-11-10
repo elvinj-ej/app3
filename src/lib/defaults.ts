@@ -60,3 +60,19 @@ export function defaultSettings(today = new Date()): Settings {
   const fy = fyOf(today);
   return { currentFY: fy, horizonFY: fy + 5, includePoweredOff: false, deadlines: DEFAULT_DEADLINES, clusterVendor: {}, confidenceWeights: { ...DEFAULT_WEIGHTS }, sovereignClusters: {}, domainOverrides: {} };
 }
+
+/** Milestone marker colours – distinct from the blue VM / orange vCPU lines. */
+export const MILESTONE_PALETTE = ['#1baf7a', '#6250d6', '#e87ba4', '#c98500', '#008300', '#e34948', '#104281', '#8a5a00'];
+
+export function isOnExec(d: Deadline): boolean {
+  return d.showOnExec !== false;
+}
+export function milestoneMarker(d: Deadline): 'dot' | 'line' {
+  return d.marker ?? (d.kind === 'GoLive' ? 'line' : 'dot');
+}
+/** A milestone keeps its colour: the one chosen in Settings, else a palette colour by its place in the list. */
+export function milestoneColor(d: Deadline, all: Deadline[]): string {
+  if (d.color) return d.color;
+  const i = Math.max(0, all.findIndex((x) => x.id === d.id));
+  return MILESTONE_PALETTE[i % MILESTONE_PALETTE.length];
+}

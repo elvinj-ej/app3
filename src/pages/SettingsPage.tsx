@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { defaultVendor, useStore, vendorOf } from '../lib/store';
 import { fyLabel } from '../lib/fy';
 import type { ConfidenceWeights, Deadline, HwVendor, PlanMap } from '../lib/types';
-import { DEADLINE_KINDS, DEFAULT_WEIGHTS } from '../lib/defaults';
+import { DEADLINE_KINDS, DEFAULT_WEIGHTS, isOnExec, milestoneColor, milestoneMarker } from '../lib/defaults';
 import { newId } from '../lib/api';
 
 export default function SettingsPage() {
@@ -92,7 +92,7 @@ export default function SettingsPage() {
 
       <div className="card card-pad" style={{ marginBottom: 16 }}>
         <div className="card-head">
-          <div><h2>Deadlines</h2><p className="sub">Shown on the executive summary and marked on the timeline. Tick “confirmed” once the contract date is verified.</p></div>
+          <div><h2>Deadlines</h2><p className="sub">Milestones ticked “Show on Exec Summary” appear in Key deadlines and on the chart as a numbered dot in their colour (or a dotted line for enterprise-wide milestones). Tick “confirmed” once the date is verified.</p></div>
           <div className="filters">
             <button className="btn btn-sm" onClick={() => setDraft([...deadlines, { id: newId(), label: 'New deadline', date: new Date().toISOString().slice(0, 10), kind: 'Other', confirmed: false }])}>+ Add deadline</button>
             {dirty && <button className="btn btn-sm" onClick={() => setDraft(null)}>Discard</button>}
@@ -101,7 +101,7 @@ export default function SettingsPage() {
         </div>
         <div className="table-wrap">
           <table className="t">
-            <thead><tr><th>Label</th><th>Date</th><th>Type</th><th>Confirmed</th><th>Note</th><th /></tr></thead>
+            <thead><tr><th>Label</th><th>Date</th><th>Type</th><th>Confirmed</th><th title="Show this milestone to leadership on the Executive Summary (and in the Excel export)">On Exec<br />Summary</th><th>Colour</th><th title="Dot = numbered dot just above the time axis; Dotted line = enterprise-wide milestone">Shown as</th><th>Note</th><th /></tr></thead>
             <tbody>
               {deadlines.map((d) => (
                 <tr key={d.id}>
@@ -113,7 +113,15 @@ export default function SettingsPage() {
                     </select>
                   </td>
                   <td><input type="checkbox" checked={d.confirmed} onChange={(e) => editDl(d.id, { confirmed: e.target.checked })} aria-label="Confirmed" /></td>
-                  <td><input className="input select-sm" style={{ width: '100%', minWidth: 200 }} value={d.note ?? ''} onChange={(e) => editDl(d.id, { note: e.target.value })} /></td>
+                  <td><input type="checkbox" checked={isOnExec(d)} onChange={(e) => editDl(d.id, { showOnExec: e.target.checked })} aria-label={`Show ${d.label} on the Executive Summary`} /></td>
+                  <td><input type="color" className="color-pick" value={milestoneColor(d, deadlines)} onChange={(e) => editDl(d.id, { color: e.target.value })} aria-label={`Colour for ${d.label}`} /></td>
+                  <td>
+                    <select className="select select-sm" value={milestoneMarker(d)} onChange={(e) => editDl(d.id, { marker: e.target.value as 'dot' | 'line' })} aria-label={`Chart marker for ${d.label}`}>
+                      <option value="dot">Dot</option>
+                      <option value="line">Dotted line</option>
+                    </select>
+                  </td>
+                  <td><input className="input select-sm" style={{ width: '100%', minWidth: 140 }} value={d.note ?? ''} onChange={(e) => editDl(d.id, { note: e.target.value })} /></td>
                   <td><button className="btn btn-sm btn-danger" onClick={() => setDraft(deadlines.filter((x) => x.id !== d.id))}>Remove</button></td>
                 </tr>
               ))}

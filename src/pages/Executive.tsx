@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react';
 import {
-  Area, Bar, BarChart, CartesianGrid, ComposedChart, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  Area, Bar, BarChart, CartesianGrid, ComposedChart, Line, LineChart, ReferenceDot, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import { useStore, vendorOf } from '../lib/store';
 import { DISP, DISPOSITIONS } from '../lib/dispositions';
 import { daysUntil, fmtDate, fyEnd, fyLabel, fyOf, fyQuarterOf, humanCountdown, parseISODate, quarterLabel } from '../lib/fy';
 import { byDisposition, vmExitDate, exitsBy, footprintScenarios, groupApps, planFor, scopeVMs, totals, trend, whatStays, type Granularity, type Scenarios, type TrendPoint } from '../lib/projection';
-import { CONFIDENCE, VENDOR_LABEL, deadlineShort, deadlineVendor } from '../lib/defaults';
+import { CONFIDENCE, VENDOR_LABEL, deadlineVendor, isOnExec, milestoneColor, milestoneMarker } from '../lib/defaults';
 import { parseApp } from '../lib/parse';
 import { buildTimeline, type TimelineEntry } from '../lib/timeline';
 import { fmt, useColors } from '../lib/useColors';
@@ -61,7 +61,10 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
     return { by, total, unratedApps: unrated.size };
   }, [vms, plans]);
 
-  const deadlines = [...settings.deadlines].sort((a, b) => a.date.localeCompare(b.date));
+  // Only milestones marked 'Show on Executive Summary', numbered by date.
+  const deadlines = settings.deadlines.filter(isOnExec).sort((a, b) => a.date.localeCompare(b.date));
+  const dlNum = new Map(deadlines.map((d, i) => [d.id, i + 1]));
+  const dlColor = (d: Deadline) => milestoneColor(d, settings.deadlines);
   const nextDl = deadlines.find((d) => daysUntil(d.date) >= 0);
 
   // Group deadlines by the period (quarter or FY) they fall in – the chart axis is categorical.
@@ -76,19 +79,30 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
     }
     return [...m.entries()];
   }, [deadlines, points, gran]);
+  const absMax = {
+    vms: Math.max(1, ...points.map((p) => Math.max(p.vms, p.vmsPlan, p.vmsCommit))),
+    vcpu: Math.max(1, ...points.map((p) => Math.max(p.vcpu, p.vcpuPlan, p.vcpuCommit))),
+  };
   const xTick = gran === 'quarter' ? { tick: <QuarterTick fill={color('--text-2')} />, interval: 0, height: 40 } : {};
   const dotR = gran === 'quarter' ? 3 : 4;
 
-  const refs = (fill: string, showLabel = true) =>
-    refLines.map(([fy, ds]) => (
-      <ReferenceLine
-        key={fy}
-        x={fy}
-        stroke={color('--text-3')}
-        strokeDasharray="4 4"
-        label={showLabel ? { value: [...new Set(ds.map((d) => deadlineShort(d.kind)))].join(' · '), position: 'top', fill, fontSize: 11, offset: 8 } : undefined}
-      />
-    ));
+  // Milestones on the chart: numbered coloured dots just above the time axis (stacked when several share a period),
+  // or a dotted vertical line for enterprise-wide milestones. Same number + colour as the Key deadlines list.
+  const refs = (yFor: (k: number) => number) =>
+    refLines.flatMap(([period, ds]) => {
+      const lines = ds.filter((d) => milestoneMarker(d) === 'line');
+      const dots = ds.filter((d) => milestoneMarker(d) === 'dot');
+      return [
+        ...lines.map((d) => (
+          <ReferenceLine key={`l:${d.id}`} x={period} stroke={dlColor(d)} strokeWidth={2} strokeDasharray="2 4"
+            label={<LineBadge n={dlNum.get(d.id)!} fill={dlColor(d)} title={`${d.label} – ${fmtDate(d.date)}`} surface={color('--surface')} />} />
+        )),
+        ...dots.map((d, k) => (
+          <ReferenceDot key={`d:${d.id}`} x={period} y={yFor(k)} r={9} ifOverflow="visible"
+            shape={(p: { cx?: number; cy?: number }) => <Badge cx={p.cx ?? 0} cy={p.cy ?? 0} n={dlNum.get(d.id)!} fill={dlColor(d)} title={`${d.label} – ${fmtDate(d.date)}`} surface={color('--surface')} />} />
+        )),
+      ];
+    });
 
   const axisProps = {
     tick: { fill: color('--text-2'), fontSize: 12 },
@@ -211,7 +225,8 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
             <span><i className="ln" style={{ background: 'var(--line-vcpu)' }} /> vCPU</span>
             {mode === 'absolute' && <span><i className="dot" style={{ background: 'var(--line-vm)', opacity: 0.18, width: 16 }} /> Range: committed ↔ full plan</span>}
             {mode === 'absolute' && <span><i className="ln" style={{ background: 'none', borderTop: '2px dashed var(--text-3)' }} /> {isRisk ? 'Full plan' : 'Risk-adjusted'}</span>}
-            {refLines.length > 0 && <span><i className="dl" /> Deadline ({gran === 'quarter' ? 'quarter' : 'FY'} it falls in)</span>}
+            {refLines.length > 0 && <span><i className="ms-dot">1</i> Milestone – see Key deadlines (placed in the {gran === 'quarter' ? 'quarter' : 'FY'} it falls in)</span>}
+            {refLines.some(([, ds]) => ds.some((d) => milestoneMarker(d) === 'line')) && <span><i className="ln" style={{ background: 'none', borderTop: '2px dotted var(--text-2)' }} /> Enterprise-wide milestone</span>}
           </div>
           {mode === 'indexed' ? (
             <ResponsiveContainer width="100%" height={330}>
@@ -220,7 +235,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
                 <XAxis dataKey="label" {...axisProps} {...xTick} />
                 <YAxis domain={[0, 100]} unit="%" {...axisProps} axisLine={false} width={48} />
                 <Tooltip content={<TrendTip />} cursor={{ stroke: color('--border-strong') }} />
-                {refs(color('--text-2'))}
+                {refs((k) => 6 + k * 9)}
                 <Line animationDuration={500} type="linear" dataKey="vmsPct" name="VMs" stroke={color('--line-vm')} strokeWidth={2}
                   dot={{ r: dotR, strokeWidth: 2, stroke: color('--surface'), fill: color('--line-vm') }} activeDot={{ r: 6, strokeWidth: 2, stroke: color('--surface') }}
                   label={<EndLabel n={points.length} field="vms" text="VMs" color={color('--text-2')} points={points} dy={-8} />} />
@@ -240,7 +255,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
                       <XAxis dataKey="label" {...axisProps} {...xTick} />
                       <YAxis {...axisProps} axisLine={false} width={48} tickFormatter={(v) => fmt(v)} domain={[0, 'auto']} />
                       <Tooltip content={<TrendTip />} cursor={{ stroke: color('--border-strong') }} />
-                      {refs(color('--text-2'), false)}
+                      {refs((k) => absMax[f] * (0.07 + k * 0.11))}
                       <Area animationDuration={500} type="linear" dataKey="band" stroke="none" fill={color(f === 'vms' ? '--line-vm' : '--line-vcpu')} fillOpacity={0.16} activeDot={false} />
                       <Line animationDuration={500} type="linear" dataKey={f === 'vms' ? 'altVms' : 'altVcpu'} stroke={color('--text-3')} strokeWidth={1.5} strokeDasharray="4 3" dot={false} activeDot={false} />
                       <Line animationDuration={500} type="linear" dataKey={f} stroke={color(f === 'vms' ? '--line-vm' : '--line-vcpu')} strokeWidth={2}
@@ -295,7 +310,8 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
                   <div className="y">{at.getFullYear()}</div>
                 </div>
                 <div className="dl-title">
-                  {d.label}
+                  <i className="ms-dot" style={{ background: dlColor(d) }} title={milestoneMarker(d) === 'line' ? 'Dotted line on the chart' : 'Dot on the chart'}>{dlNum.get(d.id)}</i>
+                  {d.label}{milestoneMarker(d) === 'line' && <span className="chip">enterprise-wide</span>}
                   {!d.confirmed && <span className="chip badge-warn">Date to confirm</span>}
                 </div>
                 <div className="dl-meta">
@@ -763,3 +779,19 @@ export function printSummary() {
   setTimeout(() => window.print(), 900);
 }
 
+
+function Badge({ cx, cy, n, fill, title, surface }: { cx: number; cy: number; n: number; fill: string; title: string; surface: string }) {
+  return (
+    <g style={{ cursor: 'default' }}>
+      <title>{`${n}. ${title}`}</title>
+      <circle cx={cx} cy={cy} r={9} fill={fill} stroke={surface} strokeWidth={2} />
+      <text x={cx} y={cy} textAnchor="middle" dominantBaseline="central" fill="#fff" fontSize={10.5} fontWeight={700}>{n}</text>
+    </g>
+  );
+}
+
+function LineBadge(props: { viewBox?: { x?: number; y?: number }; n: number; fill: string; title: string; surface: string }) {
+  const x = props.viewBox?.x ?? 0;
+  const y = (props.viewBox?.y ?? 0) - 12;
+  return <Badge cx={x} cy={y} n={props.n} fill={props.fill} title={props.title} surface={props.surface} />;
+}
