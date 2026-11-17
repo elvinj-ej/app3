@@ -82,7 +82,7 @@ export function compareInventories(base: Inventory | null, next: Inventory, plan
   const vmRemoved = rawB.vms.filter((v) => !nMap.has(vmId(v))).map(ref);
   const gb = (n: number) => `${r(n)} GB`;
   const fields: [string, (v: VM) => string][] = [
-    ['vCPU', (v) => String(v.vcpu)], ['vRAM', (v) => gb(v.memGB)], ['Storage', (v) => gb(v.storageProvGB)],
+    ['vCPU', (v) => String(v.vcpu)], ['vRAM', (v) => gb(v.memGB)], ['Storage used', (v) => gb(v.storageUsedGB)],
     ['Power', (v) => (v.poweredOn ? 'On' : 'Off')], ['Application_Primary', (v) => v.appKey], ['Environment', (v) => v.environment],
     ['Cluster', (v) => v.location], ['Owner', (v) => v.owner || '—'],
   ];
@@ -90,7 +90,9 @@ export function compareInventories(base: Inventory | null, next: Inventory, plan
   for (const v of next.vms) {
     const o = bMap.get(vmId(v));
     if (!o) continue;
-    const ch = fields.map(([f, g]) => ({ field: f, from: g(o), to: g(v) })).filter((c) => c.from !== c.to);
+    // Used storage moves a little in every export: only report it when it changed by ≥10% and ≥10 GB.
+    const storMoved = (a: number, b: number) => Math.abs(b - a) >= 10 && Math.abs(b - a) >= 0.1 * Math.max(a, 1);
+    const ch = fields.map(([f, g]) => ({ field: f, from: g(o), to: g(v) })).filter((c) => c.from !== c.to && (c.field !== 'Storage used' || storMoved(o.storageUsedGB, v.storageUsedGB)));
     if (ch.length) changed.push({ name: v.name, app: v.appKey, changes: ch });
   }
 

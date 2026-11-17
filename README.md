@@ -43,7 +43,8 @@ The dashboard also has a **Print / Save as PDF** button that lays the executive 
   the clusters pinned for data sovereignty. The same matrix is in the Excel *Treatment timeline* sheet.
 - **VMs on-prem today**: total VMs, powered on and off, and how many are in the plan.
 - **Resources assigned vs. used**: vCPU and vRAM used = the 24-hour average utilisation % from the RVTools report ×
-  assigned. Storage provisioned vs. used is as reported. All figures are for powered-on VMs.
+  assigned. Storage provisioned vs. used is as reported. All figures are for powered-on VMs. Everywhere else – forecast,
+  charts, planner, change reports and Excel – storage means **storage used** (RVTools *Storage Used*).
 
 **Virtualization Resource** is a treatment for the virtualization platform itself (for example vCenter, VMware or
 HyperFlex management). Those VMs are left out of the footprint, the forecast and every chart, and are listed greyed for
@@ -86,7 +87,7 @@ The planner and the confidence card use the same RAG colours.
 
 ### vRAM and storage in the forecast (v2.9)
 
-The "Projected at end of FY…" card shows **vCPU, vRAM assigned and storage provisioned**. For each, it gives the reduction
+The "Projected at end of FY…" card shows **vCPU, vRAM assigned and storage used** (from v2.13; earlier versions used storage provisioned). For each, it gives the reduction
 against today plus the other scenario and the committed figure. The footprint chart's Indexed view has four lines
 (VMs, vCPU, vRAM, storage), and the Absolute view has four charts with the committed ↔ full plan range. All four count
 powered-on VMs, matching the rest of the footprint. The Excel key figures and

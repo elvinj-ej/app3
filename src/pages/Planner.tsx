@@ -330,7 +330,7 @@ export default function Planner() {
                           <td className="muted" colSpan={1}>{v.poweredOn ? 'On' : 'Off'}</td>
                           <td className="r num">{v.vcpu}</td>
                           <td><span className="chip">{v.environment}</span></td>
-                          <td className="muted" colSpan={5}>{v.location} · {fmt(v.memGB)} GB RAM · {fmt(v.storageProvGB)} GB disk</td>
+                          <td className="muted" colSpan={5}>{v.location} · {fmt(v.memGB)} GB RAM · {fmt(v.storageUsedGB)} GB disk used</td>
                         </tr>
                         );
                         if (!subVms.some((v) => v.component)) return subVms.map(vmRow);

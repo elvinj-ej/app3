@@ -59,7 +59,7 @@ export async function buildTreatmentWorkbook(input: {
     .sort((x, y) => (x.exit?.getTime() ?? Infinity) - (y.exit?.getTime() ?? Infinity) || y.a.vcpu - x.a.vcpu);
   const treatment = sheet(
     'Treatment plan',
-    ['Application_Primary', 'Application', 'Domain', 'Tier', 'Service', 'Owner', 'VMs', 'Powered-on VMs', 'vCPU', 'vRAM (GB)', 'Storage (GB)',
+    ['Application_Primary', 'Application', 'Domain', 'Tier', 'Service', 'Owner', 'VMs', 'Powered-on VMs', 'vCPU', 'vRAM (GB)', 'Storage used (GB)',
       'Environments', 'vCenters', 'Treatment', 'Treatment group', 'Target FY', 'Target quarter', 'Target period', 'Off on-prem by', 'Confidence', 'Counted as moved (risk-adj.)', 'Review by', 'VMs pinned (data sovereignty)', 'Notes', 'Last updated by', 'Last updated'],
     appRows.map(({ a, p, exit }) => {
       const m = dispMeta(p.disposition);
@@ -116,7 +116,7 @@ export async function buildTreatmentWorkbook(input: {
   // 4. VMs with their application's treatment
   const vmSheet = sheet(
     'VMs',
-    ['VMName', 'PowerState', 'Application_Primary', 'Component', 'Original Application_Primary (if remapped)', 'Domain', 'Tier', 'Environment', 'vCenter', 'VMLocation', 'GuestOS', 'vCPU', 'Memory (GB)', 'Storage (GB)', 'Treatment', 'Target period', 'Off on-prem by', 'Data sovereignty'],
+    ['VMName', 'PowerState', 'Application_Primary', 'Component', 'Original Application_Primary (if remapped)', 'Domain', 'Tier', 'Environment', 'vCenter', 'VMLocation', 'GuestOS', 'vCPU', 'Memory (GB)', 'Storage used (GB)', 'Storage provisioned (GB)', 'Treatment', 'Target period', 'Off on-prem by', 'Data sovereignty'],
     [...allVms]
       .sort((x, y) => x.appKey.localeCompare(y.appKey) || x.name.localeCompare(y.name))
       .map((v) => {
@@ -125,7 +125,7 @@ export async function buildTreatmentWorkbook(input: {
         const ex = vmExitDate(p, v);
         return [
           S(v.name), S(v.poweredOn ? 'PoweredOn' : 'PoweredOff'), S(v.appKey), S(v.component ?? ''), S(v.origAppKey ?? ''), S(a.domain), S(a.tier), S(v.environment), S(v.vcenter),
-          S(v.location), S(v.os), N(v.vcpu), N(v.memGB), N(Math.round(v.storageProvGB)), S(dispMeta(p.disposition).label),
+          S(v.location), S(v.os), N(v.vcpu), N(v.memGB), N(Math.round(v.storageUsedGB)), N(Math.round(v.storageProvGB)), S(dispMeta(p.disposition).label),
           S(ex ? quarterLabel(p.targetFY!, p.targetQ ?? 4) : ''), D(ex),
           S(v.pinned ? (heldBySovereignty(v, p) ? `Pinned on-prem – ${sov[v.location] || 'data sovereignty'}` : `On sovereignty cluster – ${sov[v.location] || 'data sovereignty'}`) : ''),
         ];
@@ -192,7 +192,7 @@ export async function buildTreatmentWorkbook(input: {
   const rng = (col: string, n: number) => `${CD}!$${col}$2:$${col}$${n + 1}`;
   const leaveCols = ['L', 'M', 'N', 'O', 'P'];
   const cdHeader = ['Period', `VMs remaining (${bName})`, `vCPU remaining (${bName})`, 'VMs % of today', 'vCPU % of today', '', 'FY', 'VMs remaining', 'vCPU remaining', '', 'Quarter',
-    ...leaving.map((d) => `vCPU leaving – ${d.short}`), 'vCPU leaving – total', '', 'Treatment', 'vCPU', 'VMs', 'Apps', '', `vCPU – ${altName}`, 'vCPU – committed', `VMs – ${altName}`, 'VMs – committed', '', `vRAM % of today (${bName})`, `Storage % of today (${bName})`];
+    ...leaving.map((d) => `vCPU leaving – ${d.short}`), 'vCPU leaving – total', '', 'Treatment', 'vCPU', 'VMs', 'Apps', '', `vCPU – ${altName}`, 'vCPU – committed', `VMs – ${altName}`, 'VMs – committed', '', `vRAM % of today (${bName})`, `Storage used % of today (${bName})`];
   const MIX = DISPOSITIONS.filter((d) => d.group !== 'Excluded');
   const nRows = Math.max(tq.length, tf.length, exitsC.length, MIX.length);
   const cdRows: Row[] = [];
@@ -221,11 +221,11 @@ export async function buildTreatmentWorkbook(input: {
   ex.push([C('VMs on-prem today'), N(base.vms)]);
   ex.push([C('vCPU on-prem today'), N(base.vcpu)]);
   ex.push([C('vRAM assigned today (TB)'), { value: TB(base.memGB), type: Number, format: '#,##0.0' }]);
-  ex.push([C('Storage provisioned today (TB)'), { value: TB(totals(storVms).storGB), type: Number, format: '#,##0.0' }]);
+  ex.push([C('Storage used today (TB)'), { value: TB(totals(storVms).storGB), type: Number, format: '#,##0.0' }]);
   ex.push([C(`VMs projected at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()})`), N(endT.vms)]);
   ex.push([C(`vCPU projected at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()})`), N(endT.vcpu)]);
   ex.push([C(`vRAM projected at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()}, TB)`), { value: TB((isRisk ? endS.risk : endS.plan).memGB), type: Number, format: '#,##0.0' }]);
-  ex.push([C(`Storage projected at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()}, TB)`), { value: TB((isRisk ? endStor.risk : endStor.plan).storGB), type: Number, format: '#,##0.0' }]);
+  ex.push([C(`Storage used projected at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()}, TB)`), { value: TB((isRisk ? endStor.risk : endStor.plan).storGB), type: Number, format: '#,##0.0' }]);
   ex.push([C(`vCPU at end of ${fyLabel(settings.horizonFY)} – full plan (all moves on time)`), N(endS.plan.vcpu)]);
   ex.push([C(`vCPU at end of ${fyLabel(settings.horizonFY)} – committed (High confidence only)`), N(endS.committed.vcpu)]);
   ex.push([C('vCPU reduction by horizon'), { value: base.vcpu ? (base.vcpu - endT.vcpu) / base.vcpu : 0, type: Number, format: '0%' }]);
@@ -320,7 +320,7 @@ export async function buildTreatmentWorkbook(input: {
         { name: 'VMs', valRef: rng('D', tq.length), values: tq.map((p) => p.vmsPct), color: COL.vm },
         { name: 'vCPU', valRef: rng('E', tq.length), values: tq.map((p) => p.vcpuPct), color: COL.vcpu },
         { name: 'vRAM', valRef: rng('AC', tq.length), values: tq.map((p) => p.memPct), color: '1BAF7A' },
-        { name: 'Storage', valRef: rng('AD', tq.length), values: tq.map((p) => p.storPct), color: '6250D6' },
+        { name: 'Storage used', valRef: rng('AD', tq.length), values: tq.map((p) => p.storPct), color: '6250D6' },
       ], at: pos(0) },
     { type: 'column', stacked: true, title: `vCPU leaving on-prem per quarter, by treatment (${bName.toLowerCase()})`, catRef: rng('K', exitsC.length), categories: exitsC.map((e) => e.label),
       series: leaving.map((d, i) => ({ name: d.short, valRef: rng(leaveCols[i], exitsC.length), values: exitsC.map((e) => Math.round((e[d.id] ?? 0) * 10) / 10), color: SLOT[d.id] })), at: pos(1) },

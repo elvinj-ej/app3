@@ -176,7 +176,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
           <div className="proj-grid" title="Full plan = every scheduled move happens on its target quarter. Committed = only High-confidence moves happen.">
             {METRICS.filter((m) => m.id !== 'vms').map((m) => (
               <div key={m.id}>
-                <div className="proj-k">{m.id === 'vcpu' ? 'vCPU' : m.id === 'mem' ? 'vRAM assigned' : 'Storage provisioned'}</div>
+                <div className="proj-k">{m.id === 'vcpu' ? 'vCPU' : m.id === 'mem' ? 'vRAM assigned' : 'Storage used'}</div>
                 <div className="k-value num proj-v">{m.format(endPt[m.val])}</div>
                 <div className="k-foot"><span className="delta-down">−{fmt(100 - endPt[m.pct])}%</span> vs today ({m.format(points[0][m.val])})</div>
                 <div className="k-foot">{isRisk ? 'Full plan' : 'Risk-adj.'} {m.format(isRisk ? endPt[m.plan] : endPt[m.risk])}</div>
@@ -238,7 +238,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
             <span><i className="ln" style={{ background: 'var(--line-vm)' }} /> VMs</span>
             <span><i className="ln" style={{ background: 'var(--line-vcpu)' }} /> vCPU</span>
             <span><i className="ln" style={{ background: 'var(--line-mem)' }} /> vRAM</span>
-            <span><i className="ln" style={{ background: 'var(--line-stor)' }} /> Storage</span>
+            <span><i className="ln" style={{ background: 'var(--line-stor)' }} /> Storage used</span>
             {mode === 'absolute' && <span><i className="dot" style={{ background: 'var(--text-3)', opacity: 0.25, width: 16 }} /> Range: committed ↔ full plan</span>}
             {mode === 'absolute' && <span><i className="ln" style={{ background: 'none', borderTop: '2px dashed var(--text-3)' }} /> {isRisk ? 'Full plan' : 'Risk-adjusted'}</span>}
             {refLines.length > 0 && <span><i className="ms-dot">1</i> Milestone – see Key deadlines (placed in the {gran === 'quarter' ? 'quarter' : 'FY'} it falls in)</span>}
@@ -263,7 +263,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
             <div className="grid abs-grid">
               {METRICS.map((m) => (
                 <div key={m.id}>
-                  <div className="note" style={{ fontWeight: 600, color: 'var(--text-2)' }}>{m.id === 'mem' ? 'vRAM assigned' : m.id === 'stor' ? 'Storage provisioned' : m.label}</div>
+                  <div className="note" style={{ fontWeight: 600, color: 'var(--text-2)' }}>{m.id === 'mem' ? 'vRAM assigned' : m.id === 'stor' ? 'Storage used' : m.label}</div>
                   <ResponsiveContainer width="100%" height={260}>
                     <ComposedChart data={points.map((p) => ({ ...p, _v: p[m.val] / m.div, _alt: p[m.alt] / m.div, band: [p[m.plan] / m.div, p[m.commit] / m.div] }))} margin={{ top: 18, right: 16, left: 0, bottom: 0 }}>
                       <CartesianGrid vertical={false} stroke={color('--grid')} />
@@ -450,7 +450,7 @@ function TrendTip({ active, payload, label }: { active?: boolean; payload?: { pa
       <div className="r"><span><i className="dot" style={{ background: 'var(--line-vm)' }} /> VMs ({p.basis === 'risk' ? 'risk-adj.' : 'full plan'})</span><b className="num">{fmt(p.vms)} · {p.vmsPct}%</b></div>
       <div className="r"><span><i className="dot" style={{ background: 'var(--line-vcpu)' }} /> vCPU ({p.basis === 'risk' ? 'risk-adj.' : 'full plan'})</span><b className="num">{fmt(p.vcpu)} · {p.vcpuPct}%</b></div>
       <div className="r"><span><i className="dot" style={{ background: 'var(--line-mem)' }} /> vRAM</span><b className="num">{fmtTB(p.memGB)} · {p.memPct}%</b></div>
-      <div className="r"><span><i className="dot" style={{ background: 'var(--line-stor)' }} /> Storage</span><b className="num">{fmtTB(p.storGB)} · {p.storPct}%</b></div>
+      <div className="r"><span><i className="dot" style={{ background: 'var(--line-stor)' }} /> Storage used</span><b className="num">{fmtTB(p.storGB)} · {p.storPct}%</b></div>
       <div className="r" style={{ borderTop: '1px solid var(--border)', marginTop: 4, paddingTop: 4 }}><span>{p.basis === 'risk' ? 'vCPU full plan' : 'vCPU risk-adjusted'}</span><b className="num">{fmt(p.basis === 'risk' ? p.vcpuPlan : p.vcpuRisk)}</b></div>
       <div className="r"><span>vCPU committed</span><b className="num">{fmt(p.vcpuCommit)}</b></div>
     </div>
@@ -620,7 +620,7 @@ const METRICS: { id: MetricId; label: string; cssVar: string; val: NumKey; pct: 
   { id: 'vms', label: 'VMs', cssVar: '--line-vm', val: 'vms', pct: 'vmsPct', plan: 'vmsPlan', commit: 'vmsCommit', risk: 'vmsRisk', alt: 'altVms', format: fmt, tick: fmt, div: 1 },
   { id: 'vcpu', label: 'vCPU', cssVar: '--line-vcpu', val: 'vcpu', pct: 'vcpuPct', plan: 'vcpuPlan', commit: 'vcpuCommit', risk: 'vcpuRisk', alt: 'altVcpu', format: fmt, tick: fmt, div: 1 },
   { id: 'mem', label: 'vRAM', cssVar: '--line-mem', val: 'memGB', pct: 'memPct', plan: 'memPlan', commit: 'memCommit', risk: 'memRisk', alt: 'altMem', format: fmtTB, tick: (n) => `${fmt(n)} TB`, div: 1024 },
-  { id: 'stor', label: 'Storage', cssVar: '--line-stor', val: 'storGB', pct: 'storPct', plan: 'storPlan', commit: 'storCommit', risk: 'storRisk', alt: 'altStor', format: fmtTB, tick: (n) => `${fmt(n)} TB`, div: 1024 },
+  { id: 'stor', label: 'Storage used', cssVar: '--line-stor', val: 'storGB', pct: 'storPct', plan: 'storPlan', commit: 'storCommit', risk: 'storRisk', alt: 'altStor', format: fmtTB, tick: (n) => `${fmt(n)} TB`, div: 1024 },
 ];
 
 function WhatStaysCard({ basis }: { basis: Basis }) {

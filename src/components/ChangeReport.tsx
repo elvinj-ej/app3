@@ -41,7 +41,7 @@ export default function ChangeReport({ r, title }: { r: Report; title?: string }
           ['VMs', b.vms, a.vms, fmt],
           ['vCPU', b.vcpu, a.vcpu, fmt],
           ['vRAM', b.memGB, a.memGB, tb],
-          ['Storage', b.storGB, a.storGB, tb],
+          ['Storage used', b.storGB, a.storGB, tb],
         ] as [string, number, number, (x: number) => string][]).map(([k, x, y, fm]) => (
           <div key={k} className="cr-kpi">
             <div className="k-label">{k}</div>
@@ -64,7 +64,7 @@ export default function ChangeReport({ r, title }: { r: Report; title?: string }
       <Section title="Decisions whose application left the file (parked)" count={at.parked.length} tone="warn">
         <Rows rows={at.parked.map((x) => <><b>{x.key}</b> <span className="muted">· {x.treatment}</span></>)} />
       </Section>
-      <Section title="Decided applications whose footprint moved (≥10% and ≥5 vCPU / 10 GB vRAM / 1 TB storage)" count={at.shifted.length} tone="warn">
+      <Section title="Decided applications whose footprint moved (≥10% and ≥5 vCPU / 10 GB vRAM / 1 TB storage used)" count={at.shifted.length} tone="warn">
         <Rows rows={at.shifted.map((x) => <><b>{x.key}</b> <span className="muted">· {x.treatment}</span> – {x.reasons.join(' · ')}{x.grewWhileRetiring && <span className="chip badge-warn" style={{ marginLeft: 6 }}>grew while set to Retire</span>}</>)} />
       </Section>
       <Section title="New VMs in applications scheduled to leave on-prem" count={at.newVmsInMovingApps.length} tone="warn">

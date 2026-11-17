@@ -46,7 +46,7 @@ export interface Totals {
   vms: number;
   vcpu: number;
   memGB: number;
-  /** Storage provisioned (GB) */
+  /** Storage used (GB) */
   storGB: number;
 }
 
@@ -57,7 +57,7 @@ export function totals(vms: VM[]): Totals {
   for (const v of vms) {
     vcpu += v.vcpu;
     memGB += v.memGB;
-    storGB += v.storageProvGB;
+    storGB += v.storageUsedGB;
   }
   return { vms: vms.length, vcpu, memGB, storGB };
 }
@@ -93,7 +93,7 @@ export function footprintScenarios(vms: VM[], plans: PlanMap, at: Date, weights:
       t.vms += f;
       t.vcpu += v.vcpu * f;
       t.memGB += v.memGB * f;
-      t.storGB += v.storageProvGB * f;
+      t.storGB += v.storageUsedGB * f;
     };
     add(plan, gone ? 0 : 1);
     add(risk, gone ? 1 - moveWeight(p.confidence, weights) : 1);
@@ -258,7 +258,7 @@ export function groupApps(vms: VM[]): AppRow[] {
     r.vmCount++;
     r.vcpu += v.vcpu;
     r.memGB += v.memGB;
-    r.storageGB += v.storageProvGB;
+    r.storageGB += v.storageUsedGB;
     if (!r.environments.includes(v.environment)) r.environments.push(v.environment);
     if (!r.sites.includes(v.site)) r.sites.push(v.site);
     if (!r.owner && v.owner) r.owner = v.owner;
