@@ -684,7 +684,8 @@ function ResourcesCard({ vms }: { vms: { vcpu: number; memGB: number; storagePro
   const rows = [
     { k: 'vCPU', a: fmt(vcpu), u: fmt(vcpuUsed), pct: vcpu ? vcpuUsed / vcpu : 0, help: '24-hour average CPU usage % (RVTools) × vCPU assigned – powered-on VMs' },
     { k: 'vRAM', a: tb(mem), u: tb(memUsed), pct: mem ? memUsed / mem : 0, help: '24-hour average memory usage % (RVTools) × vRAM assigned – powered-on VMs' },
-    { k: 'Storage', a: tb(sp), u: tb(su), pct: sp ? su / sp : 0, help: 'Storage Provisioned vs. Storage Used from RVTools – powered-on VMs' },
+    // Storage leads with used (the figure used everywhere else); provisioned is shown for reference.
+    { k: 'Storage', a: tb(su), aLabel: 'used', u: `of ${tb(sp)} provisioned`, pct: sp ? su / sp : 0, help: 'Storage Used vs. Storage Provisioned from RVTools – powered-on VMs' },
   ];
   return (
     <div className="card kpi kpi-wide">
@@ -693,9 +694,9 @@ function ResourcesCard({ vms }: { vms: { vcpu: number; memGB: number; storagePro
         {rows.map((r) => (
           <div className="res-row" key={r.k} title={r.help}>
             <span className="res-k">{r.k}</span>
-            <span className="res-v num"><b>{r.a}</b> assigned</span>
+            <span className="res-v num"><b>{r.a}</b> {r.aLabel ?? 'assigned'}</span>
             <span className="res-bar"><span style={{ width: `${Math.min(100, r.pct * 100)}%` }} /></span>
-            <span className="res-u num">{r.u} used · {Math.round(r.pct * 100)}%</span>
+            <span className="res-u num">{r.aLabel ? r.u : `${r.u} used`} · {Math.round(r.pct * 100)}%</span>
           </div>
         ))}
       </div>
