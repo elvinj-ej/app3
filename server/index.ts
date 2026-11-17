@@ -555,8 +555,12 @@ api.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
 app.use('/api', api);
 
 if (STATIC_DIR) {
-  app.use(express.static(STATIC_DIR, { index: 'index.html', maxAge: '1h' }));
-  app.get(/^(?!\/api\/).*/, (_req, res) => res.sendFile(join(STATIC_DIR, 'index.html')));
+  // Hashed assets can be cached for a long time; the page itself must always be re-checked so a new version shows at once.
+  app.use(express.static(STATIC_DIR, {
+    index: 'index.html',
+    setHeaders: (res, path) => res.setHeader('Cache-Control', /[\\/]assets[\\/]/.test(path) ? 'public, max-age=31536000, immutable' : 'no-cache'),
+  }));
+  app.get(/^(?!\/api\/).*/, (_req, res) => { res.setHeader('Cache-Control', 'no-cache'); res.sendFile(join(STATIC_DIR, 'index.html')); });
 } else {
   app.get('/', (_req, res) => res.type('text').send('Web app not built. Run "npm run build" first (API is available under /api).'));
 }

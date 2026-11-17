@@ -63,6 +63,7 @@ export default function App() {
         <div className="brand">
           <span className="brand-mark" aria-hidden>▤</span>
           {APP_NAME}
+          <span className="brand-ver" title="Version running on this server">v{__APP_VERSION__}</span>
         </div>
         <nav className="nav">
           {ROUTES.map((r) => (
