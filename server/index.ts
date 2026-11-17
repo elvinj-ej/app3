@@ -69,6 +69,27 @@ if (!store.hasFlag('seed_v26')) {
   console.log('  Set 2 Virtualization Resource applications and 2 domain corrections');
 }
 
+// v2.12 one-time setup agreed with the owner: new Commercial domain, Salesforce.com (CSV) moves into it.
+if (!store.hasFlag('seed_v212')) {
+  const SF_KEY = 'Salesforce.com (CSV) - Tier1 - SCC (Customer Relationship Management)';
+  const latest = store.latestUploadId();
+  const inFile = latest ? [...new Set((store.getInventory(latest)?.vms ?? []).map((v) => v.appKey))].filter((k) => /^salesforce\.com \(csv\)/i.test(k)) : [];
+  const keys = inFile.length ? inFile : [SF_KEY];
+  if (store.existed) console.log(`  Backup before v2.12 setup: ${store.backup('v212-setup')}`);
+  store.tx(() => {
+    const cur = store.getSettings(sharedDefaults());
+    const overrides = { ...(cur.domainOverrides ?? {}) };
+    for (const k of keys) {
+      if (overrides[k]) continue;
+      overrides[k] = 'Commercial';
+      store.logEvent(k, `Domain set to Commercial (was ${parsedDomain(k)} in VMInfo)`, SEED_BY);
+    }
+    store.saveSettings({ ...cur, domainOverrides: overrides });
+    store.setFlag('seed_v212');
+  });
+  console.log(`  Moved ${keys.length} Salesforce application(s) to the Commercial domain`);
+}
+
 /** Inventory as the app sees it: the uploaded file with mapping rules applied. */
 function mappedInventory(id: number): Inventory | null {
   const inv = store.getInventory(id);

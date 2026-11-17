@@ -48,7 +48,8 @@ The dashboard also has a **Print / Save as PDF** button that lays the executive 
 **Virtualization Resource** is a treatment for the virtualization platform itself (for example vCenter, VMware or
 HyperFlex management). Those VMs are left out of the footprint, the forecast and every chart, and are listed greyed for
 reference. **Domain corrections**: click the Domain cell in the planner to override the domain parsed from
-Application_Primary. Corrections are kept across uploads and logged in Activity.
+Application_Primary. Corrections are kept across uploads and logged in Activity. The list includes a **Commercial**
+domain (v2.12); Salesforce.com (CSV) is moved into it on first start.
 
 ### Reviewing a new VMInfo upload (v2.11)
 

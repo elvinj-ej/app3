@@ -512,7 +512,7 @@ function DomainPicker({ appKey, domain, options }: { appKey: string; domain: str
   const { settings, updateSettings } = useStore();
   const overridden = !!settings.domainOverrides?.[appKey];
   const original = parsedDomain(appKey);
-  const opts = [...new Set([...options, original, domain, 'ISD', 'SCC', 'R&D', 'Data', 'Facility', 'Security'])].filter((d) => d && d !== 'Unclassified').sort();
+  const opts = [...new Set([...options, original, domain, 'ISD', 'SCC', 'R&D', 'Data', 'Facility', 'Security', 'Commercial'])].filter((d) => d && d !== 'Unclassified').sort();
   return (
     <div title={overridden ? `Corrected in this app – VMInfo says ${original}` : 'Domain from Application_Primary – change to correct it'}>
       <select className="select select-sm" value={domain} aria-label="Application domain"
