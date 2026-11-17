@@ -386,3 +386,27 @@ table.mx { width: 100%; border-collapse: separate; border-spacing: 0; font-size:
 .cr-list li { margin: 2px 0; }
 .cr-table { font-size: 12px; }
 @media (max-width: 900px) { .cr-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Richer KPI cards (Applications with a decision, Confidence, Next deadline) */
+.kpi-rich, .kpi-deadline { display: flex; flex-direction: column; }
+.kpi-rich .k-foot:last-child { margin-top: auto; padding-top: 8px; }
+.k-hero { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 2px; }
+.k-hero .k-value { font-size: 34px; }
+.meter-lg { height: 10px; border-radius: 5px; margin-top: 12px; }
+.k-legend { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; margin-top: 10px; font-size: 11.5px; color: var(--text-2); }
+.k-legend > span { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.k-legend i { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.k-legend b { margin-left: auto; color: var(--text); font-weight: 600; }
+.ring { position: relative; width: 58px; height: 58px; flex: none; }
+.ring-t { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.05; }
+.ring-t b { font-size: 13px; }
+.ring-t span { font-size: 9px; color: var(--text-3); }
+.kpi-deadline { position: relative; overflow: hidden; }
+.kpi-deadline::before { content: ''; position: absolute; inset: 0 0 auto 0; height: 4px; background: var(--dl, var(--accent)); }
+.nd-body { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 6px 0 2px; }
+.nd-count { font-size: 52px; font-weight: 700; letter-spacing: -0.03em; line-height: 1; color: var(--dl, var(--text)); }
+.nd-count span { font-size: 18px; font-weight: 600; margin-left: 6px; letter-spacing: 0; color: var(--text-2); }
+.nd-name { margin-top: 10px; font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 7px; }
+.nd-name i { width: 9px; height: 9px; border-radius: 50%; background: var(--dl, var(--accent)); }
+.nd-date { font-size: 12.5px; color: var(--text-2); margin-top: 2px; }
+.nd-next { font-size: 11.5px; color: var(--text-3); margin-top: 8px; }

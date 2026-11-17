@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type CSSProperties } from 'react';
 import {
   Area, Bar, BarChart, CartesianGrid, ComposedChart, Line, LineChart, ReferenceDot, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
@@ -47,6 +47,8 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
 
   const decidedApps = apps.filter((a) => planFor(plans, a.key).disposition !== 'tbd').length;
   const decidedVcpu = vms.filter((v) => planFor(plans, v.appKey).disposition !== 'tbd').reduce((s, v) => s + v.vcpu, 0);
+  const decidedPct = Math.round((decidedVcpu / (base.vcpu || 1)) * 100);
+  const topDisp = disp.filter((d) => d.id !== 'tbd' && d.id !== 'virt_resource' && d.apps).sort((a, b) => b.apps - a.apps).slice(0, 4);
   const unscheduled = disp.reduce((s, d) => s + d.unscheduledVms, 0);
   const confStats = useMemo(() => {
     const by = { high: 0, medium: 0, low: 0, unknown: 0 };
@@ -67,6 +69,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
   const dlNum = new Map(deadlines.map((d, i) => [d.id, i + 1]));
   const dlColor = (d: Deadline) => milestoneColor(d, settings.deadlines);
   const nextDl = deadlines.find((d) => daysUntil(d.date) >= 0);
+  const confPct = confStats.total ? Math.round(((confStats.by.high + confStats.by.medium) / confStats.total) * 100) : 0;
 
   // Group deadlines by the period (quarter or FY) they fall in – the chart axis is categorical.
   const refLines = useMemo(() => {
@@ -158,18 +161,24 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
       <div className="grid g-kpi kpi-2rows" style={{ marginBottom: 16 }}>
         <VmCountCard />
         <ResourcesCard vms={vms} />
-        <div className="card kpi">
+        <div className="card kpi kpi-rich">
           <div className="k-label">Applications with a decision</div>
-          <div className="k-value num">
-            {decidedApps}<small>/ {apps.length}</small>
+          <div className="k-hero">
+            <div className="k-value num">{decidedApps}<small>/ {apps.length}</small></div>
+            <Ring pct={apps.length ? decidedApps / apps.length : 0} color="var(--accent)" label="of apps" />
           </div>
-          <div className="meter" title={`${Math.round((decidedVcpu / (base.vcpu || 1)) * 100)}% of vCPU decided`}>
+          <div className="meter meter-lg" title={`${decidedPct}% of vCPU decided`}>
             {DISPOSITIONS.filter((d) => d.id !== 'tbd').map((d) => {
               const s = disp.find((x) => x.id === d.id)!;
-              return s.vcpu ? <span key={d.id} style={{ width: `${(s.vcpu / base.vcpu) * 100}%`, background: d.color }} /> : null;
+              return s.vcpu ? <span key={d.id} title={`${d.label}: ${s.apps} apps · ${fmt(s.vcpu)} vCPU`} style={{ width: `${(s.vcpu / base.vcpu) * 100}%`, background: d.color }} /> : null;
             })}
           </div>
-          <div className="k-foot">{Math.round((decidedVcpu / (base.vcpu || 1)) * 100)}% of vCPU has a disposition</div>
+          <div className="k-legend">
+            {topDisp.map((d) => (
+              <span key={d.id} title={DISP[d.id].label}><i style={{ background: DISP[d.id].color }} />{DISP[d.id].short}<b className="num">{d.apps}</b></span>
+            ))}
+          </div>
+          <div className="k-foot"><b>{decidedPct}%</b> of vCPU has a disposition</div>
         </div>
         <div className="card kpi kpi-span2">
           <div className="k-label">Projected at end of {fyLabel(settings.horizonFY)} · {bLabel}</div>
@@ -186,25 +195,36 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
           </div>
           <div className="k-foot">{fmt(endPt.vms)} VMs remaining · <span className="delta-down">−{fmt(100 - endPt.vmsPct)}% VMs</span></div>
         </div>
-        <div className="card kpi">
+        <div className="card kpi kpi-rich">
           <div className="k-label">Confidence of scheduled moves</div>
-          <div className="k-value num">{confStats.total ? Math.round(((confStats.by.high + confStats.by.medium) / confStats.total) * 100) : 0}%<small>High / Medium</small></div>
-          <div className="meter" title="Share of scheduled vCPU by confidence">
-            {CONFIDENCE.map((c) => (confStats.by[c.id] ? <span key={c.id} style={{ width: `${(confStats.by[c.id] / confStats.total) * 100}%`, background: c.color }} /> : null))}
+          <div className="k-hero">
+            <div className="k-value num">{confPct}%<small>High / Medium</small></div>
           </div>
-          <div className="k-foot">{confStats.unratedApps ? `${confStats.unratedApps} scheduled apps not rated yet` : 'All scheduled apps rated'}</div>
+          <div className="meter meter-lg" title="Share of scheduled vCPU by confidence">
+            {CONFIDENCE.map((c) => (confStats.by[c.id] ? <span key={c.id} title={`${c.label}: ${fmt(confStats.by[c.id])} vCPU`} style={{ width: `${(confStats.by[c.id] / confStats.total) * 100}%`, background: c.color }} /> : null))}
+          </div>
+          <div className="k-legend">
+            {CONFIDENCE.map((c) => (
+              <span key={c.id}><i style={{ background: c.color }} />{c.label}<b className="num">{confStats.total ? Math.round((confStats.by[c.id] / confStats.total) * 100) : 0}%</b></span>
+            ))}
+          </div>
+          <div className="k-foot">{confStats.unratedApps ? <><b>{confStats.unratedApps}</b> scheduled apps not rated yet</> : 'All scheduled apps rated'}</div>
         </div>
-        <div className="card kpi">
+        <div className="card kpi kpi-deadline" style={nextDl ? ({ '--dl': dlColor(nextDl) } as CSSProperties) : undefined}>
           <div className="k-label">Next deadline</div>
-          {nextDl ? (
-            <>
-              <div className="k-value" style={{ fontSize: 20, marginTop: 8 }}>{humanCountdown(daysUntil(nextDl.date))}</div>
-              <div className="k-foot">
-                {nextDl.label} · {fmtDate(nextDl.date)}
+          {nextDl ? (() => {
+            const c = countdownParts(daysUntil(nextDl.date));
+            const after = deadlines.filter((d) => d.id !== nextDl.id && daysUntil(d.date) >= daysUntil(nextDl.date))[0];
+            return (
+              <div className="nd-body">
+                <div className="nd-count num">{c.n}<span>{c.unit}</span></div>
+                <div className="nd-name"><i />{nextDl.label}</div>
+                <div className="nd-date">{fmtDate(nextDl.date)}</div>
+                {after && <div className="nd-next">then {after.label} · {humanCountdown(daysUntil(after.date))}</div>}
               </div>
-            </>
-          ) : (
-            <div className="k-foot">No upcoming deadlines set</div>
+            );
+          })() : (
+            <div className="nd-body"><div className="k-foot">No upcoming deadlines set</div></div>
           )}
         </div>
       </div>
@@ -320,7 +340,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
             const days = daysUntil(d.date);
             return (
               <div className="deadline" key={d.id}>
-                <div className="dl-date">
+                <div className="nd-date">
                   <div className="m">{at.toLocaleDateString('en-AU', { month: 'short' })}</div>
                   <div className="y">{at.getFullYear()}</div>
                 </div>
@@ -725,7 +745,7 @@ function TreatmentMatrix() {
     const tip = `${e.name}${e.q ? ` · target Q${e.q}` : ''}${timed ? ` · ${c ? `${c.label} confidence` : 'confidence not rated'}` : ''} · ${e.vms} VM${e.vms === 1 ? '' : 's'}, ${fmt(e.vcpu)} vCPU`;
     if (!timed) return <span className="pill neutral" title={tip}><span className="pn">{e.name}</span></span>;
     return (
-      <span className={`pill${c ? '' : ' unrated'}`} style={c ? ({ '--pc': c.color } as React.CSSProperties) : undefined} title={tip}>
+      <span className={`pill${c ? '' : ' unrated'}`} style={c ? ({ '--pc': c.color } as CSSProperties) : undefined} title={tip}>
         <span className="pl">{c ? c.label[0] : '?'}</span>
         <span className="pn">{e.name}</span>
         {e.q ? <span className="pq">Q{e.q}</span> : null}
@@ -772,7 +792,7 @@ function TreatmentMatrix() {
       </div>
       <div className="conf-legend">
         <b>Confidence:</b>
-        {CONFIDENCE.map((c) => <span key={c.id} className="pill" style={{ '--pc': c.color } as React.CSSProperties}><span className="pl">{c.label[0]}</span><span className="pn">{c.label} · {settings.confidenceWeights[c.id]}%</span></span>)}
+        {CONFIDENCE.map((c) => <span key={c.id} className="pill" style={{ '--pc': c.color } as CSSProperties}><span className="pl">{c.label[0]}</span><span className="pn">{c.label} · {settings.confidenceWeights[c.id]}%</span></span>)}
         <span className="pill unrated"><span className="pl">?</span><span className="pn">Not rated</span></span>
       </div>
       <div className="table-wrap" style={{ borderTop: 0 }}>
@@ -839,4 +859,27 @@ function LineBadge(props: { viewBox?: { x?: number; y?: number }; n: number; fil
   const x = props.viewBox?.x ?? 0;
   const y = (props.viewBox?.y ?? 0) - 12;
   return <Badge cx={x} cy={y} n={props.n} fill={props.fill} title={props.title} surface={props.surface} />;
+}
+
+/** Small progress ring used on the KPI cards. */
+function Ring({ pct, color, label }: { pct: number; color: string; label: string }) {
+  const r = 22, c = 2 * Math.PI * r, p = Math.max(0, Math.min(1, pct));
+  return (
+    <div className="ring" aria-hidden>
+      <svg width="58" height="58" viewBox="0 0 58 58">
+        <circle cx="29" cy="29" r={r} fill="none" stroke="var(--surface-2)" strokeWidth="7" />
+        <circle cx="29" cy="29" r={r} fill="none" stroke={color} strokeWidth="7" strokeLinecap="round"
+          strokeDasharray={`${c * p} ${c}`} transform="rotate(-90 29 29)" />
+      </svg>
+      <div className="ring-t"><b className="num">{Math.round(p * 100)}%</b><span>{label}</span></div>
+    </div>
+  );
+}
+
+function countdownParts(days: number): { n: string; unit: string } {
+  if (days === 0) return { n: 'Today', unit: '' };
+  if (days < 60) return { n: String(days), unit: days === 1 ? 'day' : 'days' };
+  const months = Math.round(days / 30.44);
+  if (months < 24) return { n: String(months), unit: months === 1 ? 'month' : 'months' };
+  return { n: (days / 365.25).toFixed(1), unit: 'years' };
 }
