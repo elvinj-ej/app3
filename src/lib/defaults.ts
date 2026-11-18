@@ -36,19 +36,20 @@ export function deadlineVendor(kind: Deadline['kind']): HwVendor | null {
   return kind === 'Cisco' || kind === 'FlashStack' || kind === 'Lenovo' ? kind : null;
 }
 
-export const DEFAULT_WEIGHTS: ConfidenceWeights = { high: 100, medium: 75, low: 50, unknown: 25, unrated: 25 };
+export const DEFAULT_WEIGHTS: ConfidenceWeights = { budgeted: 100, high: 90, medium: 75, low: 50, unknown: 25, unrated: 25 };
 
 export const CONFIDENCE: { id: Confidence; label: string; color: string }[] = [
+  { id: 'budgeted', label: 'Budgeted', color: 'var(--c-bud)' },
   { id: 'high', label: 'High', color: 'var(--c-high)' },
   { id: 'medium', label: 'Medium', color: 'var(--c-med)' },
   { id: 'low', label: 'Low', color: 'var(--c-low)' },
   { id: 'unknown', label: 'Unknown', color: 'var(--c-unk)' },
 ];
-export const CONFIDENCE_LABEL: Record<Confidence, string> = { high: 'High', medium: 'Medium', low: 'Low', unknown: 'Unknown' };
+export const CONFIDENCE_LABEL: Record<Confidence, string> = { budgeted: 'Budgeted', high: 'High', medium: 'Medium', low: 'Low', unknown: 'Unknown' };
 
 /** Probability (0-1) that a scheduled move happens by its target quarter. */
 export function moveWeight(c: Confidence | undefined, w: ConfidenceWeights): number {
-  const v = c ? w[c] : w.unrated;
+  const v = c ? (w[c] ?? DEFAULT_WEIGHTS[c]) : w.unrated;
   return Math.max(0, Math.min(100, Number.isFinite(v) ? v : 0)) / 100;
 }
 

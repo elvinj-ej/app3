@@ -33,7 +33,8 @@
   --line-mem: #1baf7a;
   --line-stor: #6250d6;
   /* confidence – ordinal blue ramp (validated) */
-  --c-high: #0ca30c;
+  --c-bud: #0b6b0b;
+  --c-high: #44b244;
   --c-med: #e6a100;
   --c-low: #ec835a;
   --c-unk: #d03b3b;
@@ -70,7 +71,8 @@
     --line-vcpu: #d95926;
     --line-mem: #199e70;
     --line-stor: #9085e9;
-    --c-high: #0ca30c;
+    --c-bud: #2e9a2e;
+  --c-high: #7fd27f;
     --c-med: #e6a100;
     --c-low: #ec835a;
     --c-unk: #d03b3b;
@@ -106,7 +108,8 @@
   --line-vcpu: #d95926;
   --line-mem: #199e70;
   --line-stor: #9085e9;
-  --c-high: #0ca30c;
+  --c-bud: #2e9a2e;
+  --c-high: #7fd27f;
   --c-med: #e6a100;
   --c-low: #ec835a;
   --c-unk: #d03b3b;
@@ -410,3 +413,6 @@ table.mx { width: 100%; border-collapse: separate; border-spacing: 0; font-size:
 .nd-name i { width: 9px; height: 9px; border-radius: 50%; background: var(--dl, var(--accent)); }
 .nd-date { font-size: 12.5px; color: var(--text-2); margin-top: 2px; }
 .nd-next { font-size: 11.5px; color: var(--text-3); margin-top: 8px; }
+
+.proj-used { margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--border); color: var(--text-2); }
+.proj-used b { color: var(--text); font-weight: 600; }

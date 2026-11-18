@@ -90,6 +90,22 @@ if (!store.hasFlag('seed_v212')) {
   console.log(`  Moved ${keys.length} Salesforce application(s) to the Commercial domain`);
 }
 
+// v2.15 one-time setup agreed with the owner: new Budgeted confidence (100%); High becomes 90% if still at its old default.
+if (!store.hasFlag('seed_v215')) {
+  store.tx(() => {
+    const cur = store.getSettings(sharedDefaults());
+    const w = { ...cur.confidenceWeights } as Record<string, number>;
+    const notes: string[] = [];
+    if (w.budgeted === undefined) { w.budgeted = 100; notes.push('Budgeted confidence added at 100%'); }
+    if (w.high === 100) { w.high = 90; notes.push('High confidence weight 100% → 90%'); }
+    if (notes.length) {
+      store.saveSettings({ ...cur, confidenceWeights: w as SharedSettings['confidenceWeights'] });
+      store.logEvent('Confidence weights', notes.join(' · '), SEED_BY);
+    }
+    store.setFlag('seed_v215');
+  });
+}
+
 /** Inventory as the app sees it: the uploaded file with mapping rules applied. */
 function mappedInventory(id: number): Inventory | null {
   const inv = store.getInventory(id);
@@ -129,7 +145,7 @@ class HttpError extends Error {
   }
 }
 
-const VALID_CONF = new Set(['high', 'medium', 'low', 'unknown']);
+const VALID_CONF = new Set(['budgeted', 'high', 'medium', 'low', 'unknown']);
 
 function cleanPlan(input: Partial<AppPlan>): Pick<AppPlan, 'disposition' | 'targetFY' | 'targetQ' | 'notes' | 'confidence' | 'reviewFY' | 'reviewQ'> {
   const disposition = (input.disposition ?? 'tbd') as Disposition;
@@ -377,7 +393,7 @@ api.put('/settings', wrap((req, res) => {
   }
   if (patch.confidenceWeights && typeof patch.confidenceWeights === 'object') {
     const w = { ...cur.confidenceWeights };
-    for (const k of ['high', 'medium', 'low', 'unknown', 'unrated'] as const) {
+    for (const k of ['budgeted', 'high', 'medium', 'low', 'unknown', 'unrated'] as const) {
       const v = Number(patch.confidenceWeights[k]);
       if (Number.isFinite(v)) w[k] = Math.max(0, Math.min(100, Math.round(v)));
     }

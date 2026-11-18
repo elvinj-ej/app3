@@ -50,6 +50,18 @@ export interface Totals {
   storGB: number;
 }
 
+/**
+ * VMs resized to what they actually use: vCPU × 24-h average CPU % and vRAM × 24-h average memory % (RVTools).
+ * VMs without utilisation data keep their assigned size (conservative).
+ */
+export function usedVMs(vms: VM[]): VM[] {
+  return vms.map((v) => ({
+    ...v,
+    vcpu: v.cpuAvgPct !== undefined ? (v.vcpu * v.cpuAvgPct) / 100 : v.vcpu,
+    memGB: v.memAvgPct !== undefined ? (v.memGB * v.memAvgPct) / 100 : v.memGB,
+  }));
+}
+
 export function totals(vms: VM[]): Totals {
   let vcpu = 0;
   let memGB = 0;
@@ -97,7 +109,7 @@ export function footprintScenarios(vms: VM[], plans: PlanMap, at: Date, weights:
     };
     add(plan, gone ? 0 : 1);
     add(risk, gone ? 1 - moveWeight(p.confidence, weights) : 1);
-    add(committed, gone && p.confidence === 'high' ? 0 : 1);
+    add(committed, gone && (p.confidence === 'budgeted' || p.confidence === 'high') ? 0 : 1);
   }
   return { plan, risk, committed };
 }

@@ -1,7 +1,7 @@
 import writeExcelFile from 'write-excel-file/node';
 import { DISPOSITIONS, dispMeta } from '../src/lib/dispositions.ts';
 import { fyLabel, fyOf, fyQuarterEnd, parseISODate, quarterLabel, quarterRange } from '../src/lib/fy.ts';
-import { byDisposition, exitDate, vmExitDate, heldBySovereignty, exitsBy, footprintScenarios, groupApps, periods, planFor, scopeVMs, totals, trend, whatStays } from '../src/lib/projection.ts';
+import { byDisposition, exitDate, vmExitDate, heldBySovereignty, exitsBy, footprintScenarios, groupApps, periods, planFor, scopeVMs, totals, trend, usedVMs, whatStays } from '../src/lib/projection.ts';
 import { CONFIDENCE, CONFIDENCE_LABEL, VENDOR_LABEL, deadlineVendor, isOnExec, moveWeight, vendorOf } from '../src/lib/defaults.ts';
 import { addCharts, fitSheetsToWidth, type ChartDef } from './charts.ts';
 import { buildTimeline, type TimelineEntry } from '../src/lib/timeline.ts';
@@ -226,8 +226,16 @@ export async function buildTreatmentWorkbook(input: {
   ex.push([C(`vCPU projected at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()})`), N(endT.vcpu)]);
   ex.push([C(`vRAM projected at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()}, TB)`), { value: TB((isRisk ? endS.risk : endS.plan).memGB), type: Number, format: '#,##0.0' }]);
   ex.push([C(`Storage used projected at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()}, TB)`), { value: TB((isRisk ? endStor.risk : endStor.plan).storGB), type: Number, format: '#,##0.0' }]);
+  const usedV = usedVMs(vms), usedT = totals(usedV), usedE = footprintScenarios(usedV, plans, fyQuarterEnd(settings.horizonFY, 4), W8);
+  const usedEnd = isRisk ? usedE.risk : usedE.plan;
+  if (vms.some((v) => v.cpuAvgPct !== undefined || v.memAvgPct !== undefined)) {
+    ex.push([C('vCPU used today (24-h avg × assigned)'), N(Math.round(usedT.vcpu))]);
+    ex.push([C('vRAM used today (24-h avg × assigned, TB)'), { value: TB(usedT.memGB), type: Number, format: '#,##0.0' }]);
+    ex.push([C(`vCPU used projected at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()})`), N(Math.round(usedEnd.vcpu))]);
+    ex.push([C(`vRAM used projected at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()}, TB)`), { value: TB(usedEnd.memGB), type: Number, format: '#,##0.0' }]);
+  }
   ex.push([C(`vCPU at end of ${fyLabel(settings.horizonFY)} – full plan (all moves on time)`), N(endS.plan.vcpu)]);
-  ex.push([C(`vCPU at end of ${fyLabel(settings.horizonFY)} – committed (High confidence only)`), N(endS.committed.vcpu)]);
+  ex.push([C(`vCPU at end of ${fyLabel(settings.horizonFY)} – committed (Budgeted + High only)`), N(endS.committed.vcpu)]);
   ex.push([C('vCPU reduction by horizon'), { value: base.vcpu ? (base.vcpu - endT.vcpu) / base.vcpu : 0, type: Number, format: '0%' }]);
   ex.push([C('Applications with a treatment decision'), C(`${decided.length} of ${apps.length}`)]);
   ex.push([C('Share of vCPU with a decision'), { value: base.vcpu ? decidedVcpu / base.vcpu : 0, type: Number, format: '0%' }]);
@@ -345,12 +353,13 @@ export async function buildTreatmentWorkbook(input: {
   // ---------- Treatment timeline (treatment × FY matrix, application- and confidence-focused like the dashboard) ----------
   const tl = buildTimeline(allVms, plans, settings);
   const CONF_FILL: Record<string, { bg: string; fg: string; label: string }> = {
-    high: { bg: '#D9F2D9', fg: '#0B5E0B', label: 'H' },
+    budgeted: { bg: '#B7E1B7', fg: '#064406', label: 'B' },
+    high: { bg: '#E3F5E3', fg: '#1F6E1F', label: 'H' },
     medium: { bg: '#FCEFC7', fg: '#7A5200', label: 'M' },
     low: { bg: '#FCE3D8', fg: '#8A3A17', label: 'L' },
     unknown: { bg: '#F7D6D6', fg: '#8E1F1F', label: 'U' },
   };
-  const confRank = (c?: string) => { const i = ['high', 'medium', 'low', 'unknown'].indexOf(c ?? ''); return i < 0 ? 9 : i; };
+  const confRank = (c?: string) => { const i = ['budgeted', 'high', 'medium', 'low', 'unknown'].indexOf(c ?? ''); return i < 0 ? 9 : i; };
   const appCell = (e: TimelineEntry): Cell => {
     const f = e.conf ? CONF_FILL[e.conf] : null;
     return { value: `[${f ? f.label : '?'}] ${e.q ? `Q${e.q}  ` : ''}${e.name}`, type: String, backgroundColor: f ? f.bg : '#FFFFFF', color: f ? f.fg : '#52514E' };
@@ -358,7 +367,7 @@ export async function buildTreatmentWorkbook(input: {
   const nCols = tl.cols.length;
   const lab = (v: string, bg = '#F0EFEC'): Cell => ({ value: v, type: String, fontWeight: 'bold', backgroundColor: bg, wrap: true, alignVertical: 'top' });
   const tlRows: Row[] = [];
-  tlRows.push([lab('Confidence', '#FFFFFF'), ...(['high', 'medium', 'low', 'unknown'] as const).map((k) => ({ value: `[${CONF_FILL[k].label}] ${CONFIDENCE_LABEL[k]} · ${W8[k]}%`, type: String, backgroundColor: CONF_FILL[k].bg, color: CONF_FILL[k].fg } as Cell)), { value: '[?] Not rated', type: String, color: '#52514E' } as Cell, ...Array.from({ length: Math.max(0, nCols - 5) }, () => null)]);
+  tlRows.push([lab('Confidence', '#FFFFFF'), ...(['budgeted', 'high', 'medium', 'low', 'unknown'] as const).map((k) => ({ value: `[${CONF_FILL[k].label}] ${CONFIDENCE_LABEL[k]} · ${W8[k]}%`, type: String, backgroundColor: CONF_FILL[k].bg, color: CONF_FILL[k].fg } as Cell)), { value: '[?] Not rated', type: String, color: '#52514E' } as Cell, ...Array.from({ length: Math.max(0, nCols - 6) }, () => null)]);
   tlRows.push([]);
   for (const d of DISPOSITIONS.filter((x) => x.leavesOnPrem)) {
     const per = tl.move[d.id].map((es) => [...es].sort((a, b) => (a.q ?? 9) - (b.q ?? 9) || confRank(a.conf) - confRank(b.conf) || a.name.localeCompare(b.name)));

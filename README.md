@@ -45,6 +45,9 @@ The dashboard also has a **Print / Save as PDF** button that lays the executive 
 - **Resources assigned vs. used**: vCPU and vRAM used = the 24-hour average utilisation % from the RVTools report ×
   assigned. Storage provisioned vs. used is as reported. All figures are for powered-on VMs. Everywhere else – forecast,
   charts, planner, change reports and Excel – storage means **storage used** (RVTools *Storage Used*).
+  VMs without utilisation data are left out of the vCPU/vRAM used %. The "Projected at end of FY" card also shows a
+  **right-sized** line for vCPU and vRAM: assigned × 24-hour average utilisation, today and at the horizon (same scenario;
+  VMs without data count at their assigned size). The Excel key figures include the same numbers.
 
 **Virtualization Resource** is a treatment for the virtualization platform itself (for example vCenter, VMware or
 HyperFlex management). Those VMs are left out of the footprint, the forecast and every chart, and are listed greyed for
@@ -105,14 +108,14 @@ The number and colour on the chart match the badge in the Key deadlines list on 
 
 ### Confidence and the risk-adjusted forecast
 
-For each application that leaves on-prem, the planner records a **confidence**: High, Medium, Low or Unknown. It is
+For each application that leaves on-prem, the planner records a **confidence**: Budgeted, High, Medium, Low or Unknown. It is
 blank until someone rates it. Confidence means "it will be off on-prem by its target quarter". Each level counts a share of the
-workload as moved, and these weights are editable in Settings (defaults: High 100%, Medium 75%, Low 50%, Unknown 25%, Not rated 25%).
+workload as moved, and these weights are editable in Settings (defaults: Budgeted 100%, High 90%, Medium 75%, Low 50%, Unknown 25%, Not rated 25%).
 
 The forecast is shown in three scenarios:
 - **Risk-adjusted** (default headline): every move is weighted by its confidence.
 - **Full plan**: every scheduled move happens on its target quarter.
-- **Committed**: only High-confidence moves happen. This is the safe floor.
+- **Committed**: only Budgeted and High-confidence moves happen. This is the safe floor.
 
 The **Risk-adjusted / Full plan** toggle on the Executive Summary switches every headline number and chart, and the
 Excel export follows it. The absolute charts shade the range from committed to full plan.

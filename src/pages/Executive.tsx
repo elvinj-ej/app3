@@ -5,7 +5,7 @@ import {
 import { useStore, vendorOf } from '../lib/store';
 import { DISP, DISPOSITIONS } from '../lib/dispositions';
 import { daysUntil, fmtDate, fyEnd, fyLabel, fyOf, fyQuarterOf, humanCountdown, parseISODate, quarterLabel } from '../lib/fy';
-import { byDisposition, vmExitDate, exitsBy, footprintScenarios, groupApps, planFor, scopeVMs, totals, trend, whatStays, type Granularity, type Scenarios, type TrendPoint } from '../lib/projection';
+import { byDisposition, usedVMs, vmExitDate, exitsBy, footprintScenarios, groupApps, planFor, scopeVMs, totals, trend, whatStays, type Granularity, type Scenarios, type TrendPoint } from '../lib/projection';
 import { CONFIDENCE, VENDOR_LABEL, deadlineVendor, isOnExec, milestoneColor, milestoneMarker } from '../lib/defaults';
 import { parseApp } from '../lib/parse';
 import { buildTimeline, type TimelineEntry } from '../lib/timeline';
@@ -44,6 +44,12 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
   const disp = useMemo(() => byDisposition(vms, plans), [vms, plans]);
   const apps = useMemo(() => groupApps(vms), [vms]);
   const endPt = points[points.length - 1];
+  // Right-sized view (vCPU / vRAM actually used, 24-h average) – today and at the end of the horizon.
+  const used = useMemo(() => {
+    const u = usedVMs(vms);
+    const end = footprintScenarios(u, plans, fyEnd(settings.horizonFY), settings.confidenceWeights);
+    return { today: totals(u), end: isRisk ? end.risk : end.plan, have: vms.some((v) => v.cpuAvgPct !== undefined || v.memAvgPct !== undefined) };
+  }, [vms, plans, settings, isRisk]);
 
   const decidedApps = apps.filter((a) => planFor(plans, a.key).disposition !== 'tbd').length;
   const decidedVcpu = vms.filter((v) => planFor(plans, v.appKey).disposition !== 'tbd').reduce((s, v) => s + v.vcpu, 0);
@@ -51,7 +57,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
   const topDisp = disp.filter((d) => d.id !== 'tbd' && d.id !== 'virt_resource' && d.apps).sort((a, b) => b.apps - a.apps).slice(0, 4);
   const unscheduled = disp.reduce((s, d) => s + d.unscheduledVms, 0);
   const confStats = useMemo(() => {
-    const by = { high: 0, medium: 0, low: 0, unknown: 0 };
+    const by = { budgeted: 0, high: 0, medium: 0, low: 0, unknown: 0 };
     let total = 0;
     const unrated = new Set<string>();
     for (const v of vms) {
@@ -69,7 +75,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
   const dlNum = new Map(deadlines.map((d, i) => [d.id, i + 1]));
   const dlColor = (d: Deadline) => milestoneColor(d, settings.deadlines);
   const nextDl = deadlines.find((d) => daysUntil(d.date) >= 0);
-  const confPct = confStats.total ? Math.round(((confStats.by.high + confStats.by.medium) / confStats.total) * 100) : 0;
+  const confPct = confStats.total ? Math.round(((confStats.by.budgeted + confStats.by.high) / confStats.total) * 100) : 0;
 
   // Group deadlines by the period (quarter or FY) they fall in – the chart axis is categorical.
   const refLines = useMemo(() => {
@@ -182,7 +188,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
         </div>
         <div className="card kpi kpi-span2">
           <div className="k-label">Projected at end of {fyLabel(settings.horizonFY)} · {bLabel}</div>
-          <div className="proj-grid" title="Full plan = every scheduled move happens on its target quarter. Committed = only High-confidence moves happen.">
+          <div className="proj-grid" title="Full plan = every scheduled move happens on its target quarter. Committed = only Budgeted and High-confidence moves happen.">
             {METRICS.filter((m) => m.id !== 'vms').map((m) => (
               <div key={m.id}>
                 <div className="proj-k">{m.id === 'vcpu' ? 'vCPU' : m.id === 'mem' ? 'vRAM assigned' : 'Storage used'}</div>
@@ -190,6 +196,12 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
                 <div className="k-foot"><span className="delta-down">−{fmt(100 - endPt[m.pct])}%</span> vs today ({m.format(points[0][m.val])})</div>
                 <div className="k-foot">{isRisk ? 'Full plan' : 'Risk-adj.'} {m.format(isRisk ? endPt[m.plan] : endPt[m.risk])}</div>
                 <div className="k-foot">Committed {m.format(endPt[m.commit])}</div>
+                {used.have && (m.id === 'vcpu' || m.id === 'mem') && (
+                  <div className="k-foot proj-used" title="Right-sized: assigned × 24-hour average utilisation % from RVTools, same scenario as above. VMs without utilisation data count at their assigned size.">
+                    <div>Used (24-h avg) <b>{m.format(m.id === 'vcpu' ? used.end.vcpu : used.end.memGB)}</b></div>
+                    <div>today {m.format(m.id === 'vcpu' ? used.today.vcpu : used.today.memGB)} used</div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -198,7 +210,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
         <div className="card kpi kpi-rich">
           <div className="k-label">Confidence of scheduled moves</div>
           <div className="k-hero">
-            <div className="k-value num">{confPct}%<small>High / Medium</small></div>
+            <div className="k-value num">{confPct}%<small>Budgeted / High</small></div>
           </div>
           <div className="meter meter-lg" title="Share of scheduled vCPU by confidence">
             {CONFIDENCE.map((c) => (confStats.by[c.id] ? <span key={c.id} title={`${c.label}: ${fmt(confStats.by[c.id])} vCPU`} style={{ width: `${(confStats.by[c.id] / confStats.total) * 100}%`, background: c.color }} /> : null))}
@@ -246,7 +258,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
               <p className="sub">
                 {mode === 'indexed'
                   ? `${isRisk ? 'Risk-adjusted' : 'Full-plan'} VMs, vCPU, vRAM and storage remaining at the end of each ${gran === 'quarter' ? 'FY quarter' : 'FY'}, indexed to today = 100%. Hover for the other scenarios.`
-                  : `${isRisk ? 'Risk-adjusted forecast' : 'Full plan'} (solid line) within the range from committed (High confidence only) to full plan (every move on its target quarter).`}
+                  : `${isRisk ? 'Risk-adjusted forecast' : 'Full plan'} (solid line) within the range from committed (Budgeted + High only) to full plan (every move on its target quarter).`}
               </p>
             </div>
             <div className="seg" role="group" aria-label="Chart scale">
@@ -691,19 +703,20 @@ function VmCountCard() {
 }
 
 function ResourcesCard({ vms }: { vms: { vcpu: number; memGB: number; storageProvGB: number; storageUsedGB: number; cpuAvgPct?: number; memAvgPct?: number }[] }) {
-  let vcpu = 0, vcpuUsed = 0, mem = 0, memUsed = 0, sp = 0, su = 0, haveUse = 0;
+  let vcpu = 0, vcpuUsed = 0, vcpuMeas = 0, mem = 0, memUsed = 0, memMeas = 0, sp = 0, su = 0, haveUse = 0, noUse = 0;
   // All figures: VMs in the footprint (powered-on unless the setting includes powered-off; virtualization resources excluded).
   for (const v of vms) {
     vcpu += v.vcpu; mem += v.memGB;
     sp += v.storageProvGB; su += v.storageUsedGB;
-    if (v.cpuAvgPct !== undefined || v.memAvgPct !== undefined) haveUse++;
-    vcpuUsed += (v.vcpu * (v.cpuAvgPct ?? 0)) / 100;
-    memUsed += (v.memGB * (v.memAvgPct ?? 0)) / 100;
+    if (v.cpuAvgPct !== undefined || v.memAvgPct !== undefined) haveUse++; else noUse++;
+    // Used = assigned × 24-h average %; VMs without utilisation data are left out of the % (not counted as 0).
+    if (v.cpuAvgPct !== undefined) { vcpuUsed += (v.vcpu * v.cpuAvgPct) / 100; vcpuMeas += v.vcpu; }
+    if (v.memAvgPct !== undefined) { memUsed += (v.memGB * v.memAvgPct) / 100; memMeas += v.memGB; }
   }
   const tb = (gb: number) => (gb >= 1024 ? `${(gb / 1024).toLocaleString('en-AU', { maximumFractionDigits: 1 })} TB` : `${fmt(gb)} GB`);
   const rows = [
-    { k: 'vCPU', a: fmt(vcpu), u: fmt(vcpuUsed), pct: vcpu ? vcpuUsed / vcpu : 0, help: '24-hour average CPU usage % (RVTools) × vCPU assigned – powered-on VMs' },
-    { k: 'vRAM', a: tb(mem), u: tb(memUsed), pct: mem ? memUsed / mem : 0, help: '24-hour average memory usage % (RVTools) × vRAM assigned – powered-on VMs' },
+    { k: 'vCPU', a: fmt(vcpu), u: fmt(vcpuUsed), pct: vcpuMeas ? vcpuUsed / vcpuMeas : 0, help: '24-hour average CPU usage % (RVTools) × vCPU assigned – powered-on VMs' },
+    { k: 'vRAM', a: tb(mem), u: tb(memUsed), pct: memMeas ? memUsed / memMeas : 0, help: '24-hour average memory usage % (RVTools) × vRAM assigned – powered-on VMs' },
     // Storage leads with used (the figure used everywhere else); provisioned is shown for reference.
     { k: 'Storage', a: tb(su), aLabel: 'used', u: `of ${tb(sp)} provisioned`, pct: sp ? su / sp : 0, help: 'Storage Used vs. Storage Provisioned from RVTools – powered-on VMs' },
   ];
@@ -720,7 +733,7 @@ function ResourcesCard({ vms }: { vms: { vcpu: number; memGB: number; storagePro
           </div>
         ))}
       </div>
-      <div className="k-foot">{haveUse ? 'Powered-on VMs. Used = 24-hour average utilisation % from the RVTools report × assigned (vCPU, vRAM); storage used as reported.' : 'Utilisation not available in this upload'}</div>
+      <div className="k-foot">{haveUse ? `Powered-on VMs. vCPU / vRAM used = assigned × 24-hour average utilisation % (RVTools); storage used as reported.${noUse ? ` ${noUse} VM${noUse === 1 ? '' : 's'} without utilisation data left out of the %.` : ''}` : 'Utilisation not available in this upload'}</div>
     </div>
   );
 }

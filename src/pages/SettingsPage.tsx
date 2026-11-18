@@ -178,7 +178,8 @@ function WeightsCard() {
   const [draft, setDraft] = useState<ConfidenceWeights | null>(null);
   const w = draft ?? settings.confidenceWeights;
   const rows: { k: keyof ConfidenceWeights; label: string; help: string }[] = [
-    { k: 'high', label: 'High', help: 'Committed – funded, owner agreed, path clear' },
+    { k: 'budgeted', label: 'Budgeted', help: 'Funded in the budget – owner agreed, path clear' },
+    { k: 'high', label: 'High', help: 'Very likely – owner agreed, path clear, funding expected' },
     { k: 'medium', label: 'Medium', help: 'Likely – plan agreed, some dependencies open' },
     { k: 'low', label: 'Low', help: 'Possible – significant blockers or no funding yet' },
     { k: 'unknown', label: 'Unknown', help: 'Assessed, but too early to say' },
@@ -187,10 +188,10 @@ function WeightsCard() {
   return (
     <div className="card card-pad" style={{ marginBottom: 16 }}>
       <div className="card-head">
-        <div><h2>Confidence weights</h2><p className="sub">Share of each scheduled workload counted as moved in the risk-adjusted forecast. “Committed” counts High only; “full plan” counts every scheduled move.</p></div>
+        <div><h2>Confidence weights</h2><p className="sub">Share of each scheduled workload counted as moved in the risk-adjusted forecast. “Committed” counts Budgeted and High only; “full plan” counts every scheduled move.</p></div>
         <div className="filters">
           {draft && <button className="btn btn-sm" onClick={() => setDraft(null)}>Discard</button>}
-          <button className="btn btn-sm" onClick={() => setDraft({ ...DEFAULT_WEIGHTS })}>Reset to 100 / 75 / 50 / 25</button>
+          <button className="btn btn-sm" onClick={() => setDraft({ ...DEFAULT_WEIGHTS })}>Reset to 100 / 90 / 75 / 50 / 25</button>
           <button className="btn btn-sm btn-primary" disabled={!draft} onClick={async () => { await updateSettings({ confidenceWeights: w }); setDraft(null); toast('Confidence weights saved'); }}>Save weights</button>
         </div>
       </div>

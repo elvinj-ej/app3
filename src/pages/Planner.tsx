@@ -22,7 +22,7 @@ const tierRank = (t: string) => {
   return i < 0 ? 99 : i;
 };
 const dispRank = (d: Disposition) => DISPOSITIONS.findIndex((x) => x.id === d);
-const confRank = (p: AppPlan) => (dispMeta(p.disposition).leavesOnPrem ? (p.confidence ? ['high', 'medium', 'low', 'unknown'].indexOf(p.confidence) : 4) : 5);
+const confRank = (p: AppPlan) => (dispMeta(p.disposition).leavesOnPrem ? (p.confidence ? ['budgeted', 'high', 'medium', 'low', 'unknown'].indexOf(p.confidence) : 5) : 6);
 const targetRank = (p: AppPlan) => (p.targetFY ? p.targetFY * 10 + (p.targetQ ?? 4) : p.reviewFY ? 5000 + p.reviewFY * 10 + (p.reviewQ ?? 4) : 9999);
 
 export default function Planner() {

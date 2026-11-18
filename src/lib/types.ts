@@ -107,7 +107,7 @@ export type Disposition =
 export type Quarter = 1 | 2 | 3 | 4;
 
 /** How confident we are the application is off on-prem by its target quarter. Undefined = not rated. */
-export type Confidence = 'high' | 'medium' | 'low' | 'unknown';
+export type Confidence = 'budgeted' | 'high' | 'medium' | 'low' | 'unknown';
 
 /** Percent weights used for the risk-adjusted forecast (0-100). */
 export type ConfidenceWeights = Record<Confidence | 'unrated', number>;
