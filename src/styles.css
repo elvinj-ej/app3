@@ -416,3 +416,22 @@ table.mx { width: 100%; border-collapse: separate; border-spacing: 0; font-size:
 
 .proj-used { margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--border); color: var(--text-2); }
 .proj-used b { color: var(--text); font-weight: 600; }
+
+/* Left on-prem card: range bar from least left (all moves on time) to most left (funded moves only), on a 0 → today scale */
+.proj-v small { font-size: 12px; font-weight: 500; color: var(--text-3); margin-left: 6px; letter-spacing: 0; }
+.lbar { position: relative; display: flex; height: 12px; border-radius: 6px; overflow: visible; margin: 14px 0 8px; background: var(--surface-2); }
+.lbar > span:not(.lb-mark) { display: block; height: 100%; }
+.lbar > span:first-child { border-radius: 6px 0 0 6px; }
+.lbar > span:nth-child(3) { border-radius: 0 6px 6px 0; }
+.lb-stay { background: var(--text-3); }
+.lb-risk { background: repeating-linear-gradient(135deg, var(--c-med) 0 4px, color-mix(in srgb, var(--c-med) 55%, var(--surface)) 4px 8px); }
+.lb-go { background: var(--c-high); }
+.lb-mark { position: absolute; top: -5px; width: 3px; height: 22px; margin-left: -1.5px; border-radius: 2px; background: var(--text); box-shadow: 0 0 0 2px var(--surface); }
+.lbar-key { display: grid; gap: 3px; font-size: 11.5px; color: var(--text-2); }
+.lbar-key > div { display: flex; align-items: center; gap: 7px; }
+.lbar-key i { width: 10px; height: 10px; border-radius: 2px; flex: none; display: inline-block; }
+.lbar-key i.lb-markkey { width: 3px; height: 12px; margin: 0 3.5px; background: var(--text); border-radius: 1px; }
+.lbar-key b { margin-left: auto; padding-left: 8px; color: var(--text); font-weight: 600; white-space: nowrap; }
+.lbar-key .lbar-exp { border-top: 1px dashed var(--border); padding-top: 3px; margin-top: 1px; }
+.proj-vms { margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--text-2); }
+.proj-vms b { color: var(--text); }

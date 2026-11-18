@@ -38,13 +38,13 @@ export async function buildTreatmentWorkbook(input: {
   history: HistoryEntry[];
   uploads: UploadMeta[];
   rules?: AppRule[];
-  /** Headline basis for the Executive Summary: risk-adjusted (default) or full plan. */
+  /** Headline basis for the Executive Summary: expected (risk-adjusted, default) or best case (all moves on time). */
   basis?: 'risk' | 'plan';
 }): Promise<Buffer> {
   const { inventory, plans, settings, history, uploads } = input;
   const isRisk = input.basis !== 'plan';
-  const bName = isRisk ? 'Risk-adjusted' : 'Full plan';
-  const altName = isRisk ? 'Full plan' : 'Risk-adjusted';
+  const bName = isRisk ? 'Expected' : 'Best case';
+  const altName = isRisk ? 'Least left (all moves on time)' : 'Expected';
   const sov = settings.sovereignClusters ?? {};
   // All VMs (incl. powered-off), flagged when on a data-sovereignty cluster.
   const allVms = (inventory?.vms ?? []).map((v) => (sov[v.location] !== undefined ? { ...v, pinned: true } : v));
@@ -60,7 +60,7 @@ export async function buildTreatmentWorkbook(input: {
   const treatment = sheet(
     'Treatment plan',
     ['Application_Primary', 'Application', 'Domain', 'Tier', 'Service', 'Owner', 'VMs', 'Powered-on VMs', 'vCPU', 'vRAM (GB)', 'Storage used (GB)',
-      'Environments', 'vCenters', 'Treatment', 'Treatment group', 'Target FY', 'Target quarter', 'Target period', 'Off on-prem by', 'Confidence', 'Counted as moved (risk-adj.)', 'Review by', 'VMs pinned (data sovereignty)', 'Notes', 'Last updated by', 'Last updated'],
+      'Environments', 'vCenters', 'Treatment', 'Treatment group', 'Target FY', 'Target quarter', 'Target period', 'Off on-prem by', 'Confidence', 'Counted as moved (expected)', 'Review by', 'VMs pinned (data sovereignty)', 'Notes', 'Last updated by', 'Last updated'],
     appRows.map(({ a, p, exit }) => {
       const m = dispMeta(p.disposition);
       const scheduled = m.leavesOnPrem && p.targetFY;
@@ -89,7 +89,7 @@ export async function buildTreatmentWorkbook(input: {
   const leaving = DISPOSITIONS.filter((d) => d.leavesOnPrem);
   const roadmap = sheet(
     'Quarterly roadmap',
-    ['Quarter', 'Period', 'Quarter end', 'Apps leaving', 'VMs leaving', 'vCPU leaving', ...leaving.map((d) => `vCPU – ${d.short}`), 'VMs remaining (risk-adj.)', 'vCPU remaining (risk-adj.)', 'vCPU remaining – full plan', 'vCPU remaining – committed'],
+    ['Quarter', 'Period', 'Quarter end', 'Apps leaving', 'VMs leaving', 'vCPU leaving', ...leaving.map((d) => `vCPU – ${d.short}`), 'VMs left on-prem (expected)', 'vCPU left on-prem (expected)', 'vCPU left – least (all moves on time)', 'vCPU left – most (funded moves only)'],
     ps.map((p, i) => {
       const rem = footprintScenarios(vms, plans, p.end, W8);
       return [
@@ -192,7 +192,7 @@ export async function buildTreatmentWorkbook(input: {
   const rng = (col: string, n: number) => `${CD}!$${col}$2:$${col}$${n + 1}`;
   const leaveCols = ['L', 'M', 'N', 'O', 'P'];
   const cdHeader = ['Period', `VMs remaining (${bName})`, `vCPU remaining (${bName})`, 'VMs % of today', 'vCPU % of today', '', 'FY', 'VMs remaining', 'vCPU remaining', '', 'Quarter',
-    ...leaving.map((d) => `vCPU leaving – ${d.short}`), 'vCPU leaving – total', '', 'Treatment', 'vCPU', 'VMs', 'Apps', '', `vCPU – ${altName}`, 'vCPU – committed', `VMs – ${altName}`, 'VMs – committed', '', `vRAM % of today (${bName})`, `Storage used % of today (${bName})`];
+    ...leaving.map((d) => `vCPU leaving – ${d.short}`), 'vCPU leaving – total', '', 'Treatment', 'vCPU', 'VMs', 'Apps', '', `vCPU – ${altName}`, 'vCPU – most left', `VMs – ${altName}`, 'VMs – most left', '', `vRAM % of today (${bName})`, `Storage used % of today (${bName})`];
   const MIX = DISPOSITIONS.filter((d) => d.group !== 'Excluded');
   const nRows = Math.max(tq.length, tf.length, exitsC.length, MIX.length);
   const cdRows: Row[] = [];
@@ -222,25 +222,26 @@ export async function buildTreatmentWorkbook(input: {
   ex.push([C('vCPU on-prem today'), N(base.vcpu)]);
   ex.push([C('vRAM assigned today (TB)'), { value: TB(base.memGB), type: Number, format: '#,##0.0' }]);
   ex.push([C('Storage used today (TB)'), { value: TB(totals(storVms).storGB), type: Number, format: '#,##0.0' }]);
-  ex.push([C(`VMs projected at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()})`), N(endT.vms)]);
-  ex.push([C(`vCPU projected at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()})`), N(endT.vcpu)]);
-  ex.push([C(`vRAM projected at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()}, TB)`), { value: TB((isRisk ? endS.risk : endS.plan).memGB), type: Number, format: '#,##0.0' }]);
-  ex.push([C(`Storage used projected at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()}, TB)`), { value: TB((isRisk ? endStor.risk : endStor.plan).storGB), type: Number, format: '#,##0.0' }]);
+  ex.push([C(`VMs left on-prem at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()})`), N(endT.vms)]);
+  ex.push([C(`vCPU left on-prem at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()})`), N(endT.vcpu)]);
+  ex.push([C(`vRAM assigned left on-prem at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()}, TB)`), { value: TB((isRisk ? endS.risk : endS.plan).memGB), type: Number, format: '#,##0.0' }]);
+  ex.push([C(`Storage used left on-prem at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()}, TB)`), { value: TB((isRisk ? endStor.risk : endStor.plan).storGB), type: Number, format: '#,##0.0' }]);
   const usedV = usedVMs(vms), usedT = totals(usedV), usedE = footprintScenarios(usedV, plans, fyQuarterEnd(settings.horizonFY, 4), W8);
   const usedEnd = isRisk ? usedE.risk : usedE.plan;
   if (vms.some((v) => v.cpuAvgPct !== undefined || v.memAvgPct !== undefined)) {
     ex.push([C('vCPU used today (24-h avg × assigned)'), N(Math.round(usedT.vcpu))]);
     ex.push([C('vRAM used today (24-h avg × assigned, TB)'), { value: TB(usedT.memGB), type: Number, format: '#,##0.0' }]);
-    ex.push([C(`vCPU used projected at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()})`), N(Math.round(usedEnd.vcpu))]);
-    ex.push([C(`vRAM used projected at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()}, TB)`), { value: TB(usedEnd.memGB), type: Number, format: '#,##0.0' }]);
+    ex.push([C(`vCPU used (24-h avg) left on-prem at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()})`), N(Math.round(usedEnd.vcpu))]);
+    ex.push([C(`vRAM used (24-h avg) left on-prem at end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()}, TB)`), { value: TB(usedEnd.memGB), type: Number, format: '#,##0.0' }]);
   }
-  ex.push([C(`vCPU at end of ${fyLabel(settings.horizonFY)} – full plan (all moves on time)`), N(endS.plan.vcpu)]);
-  ex.push([C(`vCPU at end of ${fyLabel(settings.horizonFY)} – committed (Budgeted + High only)`), N(endS.committed.vcpu)]);
-  ex.push([C('vCPU reduction by horizon'), { value: base.vcpu ? (base.vcpu - endT.vcpu) / base.vcpu : 0, type: Number, format: '0%' }]);
+  ex.push([C(`vCPU left on-prem at end of ${fyLabel(settings.horizonFY)} – least left (all moves on time)`), N(endS.plan.vcpu)]);
+  ex.push([C(`vCPU left on-prem at end of ${fyLabel(settings.horizonFY)} – most left (funded moves only: Budgeted + High)`), N(endS.committed.vcpu)]);
+  ex.push([C(`vCPU moved off by end of ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()})`), N(Math.round(base.vcpu - endT.vcpu))]);
+  ex.push([C('vCPU reduction by horizon (moved off as % of today)'), { value: base.vcpu ? (base.vcpu - endT.vcpu) / base.vcpu : 0, type: Number, format: '0%' }]);
   ex.push([C('Applications with a treatment decision'), C(`${decided.length} of ${apps.length}`)]);
   ex.push([C('Share of vCPU with a decision'), { value: base.vcpu ? decidedVcpu / base.vcpu : 0, type: Number, format: '0%' }]);
   ex.push([]);
-  ex.push([TH('Deadline'), TH('Date'), TH('Status'), TH('VMs risk-adj.'), TH('vCPU risk-adj.'), TH('vCPU full plan'), TH('vCPU committed')]);
+  ex.push([TH('Deadline'), TH('Date'), TH('Status'), TH('VMs left – expected'), TH('vCPU left – expected'), TH('vCPU left – least'), TH('vCPU left – most')]);
   for (const d of settings.deadlines.filter(isOnExec).sort((a, b) => a.date.localeCompare(b.date))) {
     const at = parseISODate(d.date);
     const vendor = deadlineVendor(d.kind);
@@ -282,7 +283,7 @@ export async function buildTreatmentWorkbook(input: {
     if (vv.length) ex.push([C('Virtualization resources (excluded from the footprint)', { color: '#7A7974' }), N(new Set(vv.map((v) => v.appKey)).size), N(vv.length), N(vv.reduce((x, v) => x + v.vcpu, 0)), null]);
   }
   ex.push([]);
-  ex.push([TH('Domain'), TH('Apps'), TH('VMs'), TH('vCPU'), TH(`vCPU end ${fyLabel(settings.horizonFY)} (${isRisk ? 'risk-adj.' : 'full plan'})`)]);
+  ex.push([TH('Domain'), TH('Apps'), TH('VMs'), TH('vCPU'), TH(`vCPU left end ${fyLabel(settings.horizonFY)} (${bName.toLowerCase()})`)]);
   const domains = new Map<string, { apps: Set<string>; vms: number; vcpu: number }>();
   for (const v of vms) {
     const dn = parseApp(v.appKey).domain;
@@ -323,7 +324,7 @@ export async function buildTreatmentWorkbook(input: {
   const COL = { vm: '2A78D6', vcpu: 'EB6834' };
   const SLOT: Record<string, string> = { retire: '2A78D6', saas: 'EB6834', modernize_aws: '1BAF7A', modernize_azure: 'EDA100', rehost_aws: 'E87BA4', retain_sovereignty: '008300', retain_latency: '6250D6', retain_maintain: 'E34948', tbd: 'B9B8B0' };
   const charts: ChartDef[] = [
-    { type: 'line', title: `On-prem footprint by quarter – VMs, vCPU, vRAM, storage, ${bName.toLowerCase()} (% of today)`, catRef: rng('A', tq.length), categories: qCats, numFmt: '0"%"', yMax: 100,
+    { type: 'line', title: `Left on-prem by quarter – VMs, vCPU, vRAM, storage, ${bName.toLowerCase()} (% of today)`, catRef: rng('A', tq.length), categories: qCats, numFmt: '0"%"', yMax: 100,
       series: [
         { name: 'VMs', valRef: rng('D', tq.length), values: tq.map((p) => p.vmsPct), color: COL.vm },
         { name: 'vCPU', valRef: rng('E', tq.length), values: tq.map((p) => p.vcpuPct), color: COL.vcpu },
@@ -332,19 +333,19 @@ export async function buildTreatmentWorkbook(input: {
       ], at: pos(0) },
     { type: 'column', stacked: true, title: `vCPU leaving on-prem per quarter, by treatment (${bName.toLowerCase()})`, catRef: rng('K', exitsC.length), categories: exitsC.map((e) => e.label),
       series: leaving.map((d, i) => ({ name: d.short, valRef: rng(leaveCols[i], exitsC.length), values: exitsC.map((e) => Math.round((e[d.id] ?? 0) * 10) / 10), color: SLOT[d.id] })), at: pos(1) },
-    { type: 'line', title: 'vCPU remaining on-prem by quarter – confidence range', catRef: rng('A', tq.length), categories: qCats,
+    { type: 'line', title: 'vCPU left on-prem by quarter – least to most left', catRef: rng('A', tq.length), categories: qCats,
       series: [
-        { name: 'Committed (High only)', valRef: rng('Y', tq.length), values: tq.map((p) => p.vcpuCommit), color: '52514E', dash: true, noMarker: true },
+        { name: 'Most left (funded moves only)', valRef: rng('Y', tq.length), values: tq.map((p) => p.vcpuCommit), color: '52514E', dash: true, noMarker: true },
         { name: bName, valRef: rng('C', tq.length), values: tq.map((p) => p.vcpu), color: COL.vcpu },
         { name: altName, valRef: rng('X', tq.length), values: tq.map((p) => p.vcpuPlan), color: '9A9992', dash: true, noMarker: true },
       ], at: pos(2) },
-    { type: 'line', title: 'VMs remaining on-prem by quarter – confidence range', catRef: rng('A', tq.length), categories: qCats,
+    { type: 'line', title: 'VMs left on-prem by quarter – least to most left', catRef: rng('A', tq.length), categories: qCats,
       series: [
-        { name: 'Committed (High only)', valRef: rng('AA', tq.length), values: tq.map((p) => p.vmsCommit), color: '52514E', dash: true, noMarker: true },
+        { name: 'Most left (funded moves only)', valRef: rng('AA', tq.length), values: tq.map((p) => p.vmsCommit), color: '52514E', dash: true, noMarker: true },
         { name: bName, valRef: rng('B', tq.length), values: tq.map((p) => p.vms), color: COL.vm },
         { name: altName, valRef: rng('Z', tq.length), values: tq.map((p) => p.vmsPlan), color: '9A9992', dash: true, noMarker: true },
       ], at: pos(3) },
-    { type: 'column', title: `vCPU remaining at the end of each FY (${bName.toLowerCase()})`, catRef: rng('G', tf.length), categories: fCats,
+    { type: 'column', title: `vCPU left on-prem at the end of each FY (${bName.toLowerCase()})`, catRef: rng('G', tf.length), categories: fCats,
       series: [{ name: 'vCPU', valRef: rng('I', tf.length), values: tf.map((p) => p.vcpu), color: COL.vcpu }], at: pos(4) },
     { type: 'bar', title: "Today's vCPU by treatment", catRef: rng('S', MIX.length), categories: MIX.map((d) => d.label),
       series: [{ name: 'vCPU', valRef: rng('T', MIX.length), values: MIX.map((d) => disp.find((x) => x.id === d.id)!.vcpu), color: '2A78D6' }], at: pos(5) },

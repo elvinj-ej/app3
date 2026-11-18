@@ -188,7 +188,7 @@ function WeightsCard() {
   return (
     <div className="card card-pad" style={{ marginBottom: 16 }}>
       <div className="card-head">
-        <div><h2>Confidence weights</h2><p className="sub">Share of each scheduled workload counted as moved in the risk-adjusted forecast. “Committed” counts Budgeted and High only; “full plan” counts every scheduled move.</p></div>
+        <div><h2>Confidence weights</h2><p className="sub">Share of each scheduled workload counted as moved off on-prem in the expected forecast. “Most left” counts only Budgeted and High moves; “least left” (best case) counts every scheduled move.</p></div>
         <div className="filters">
           {draft && <button className="btn btn-sm" onClick={() => setDraft(null)}>Discard</button>}
           <button className="btn btn-sm" onClick={() => setDraft({ ...DEFAULT_WEIGHTS })}>Reset to 100 / 90 / 75 / 50 / 25</button>

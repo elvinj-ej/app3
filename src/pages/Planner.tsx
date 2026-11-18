@@ -489,7 +489,7 @@ function ConfidencePicker({ plan, weights, onChange }: { plan: AppPlan; weights:
   const c = plan.confidence;
   const meta = CONFIDENCE.find((x) => x.id === c);
   return (
-    <div className="disp-cell" title={c ? `${weights[c]}% of this workload counted as moved in the risk-adjusted forecast` : `Not rated – counted at ${weights.unrated}% in the risk-adjusted forecast`}>
+    <div className="disp-cell" title={c ? `${weights[c]}% of this workload counted as moved off on-prem in the expected forecast` : `Not rated – counted at ${weights.unrated}% in the expected forecast`}>
       <i className="dot" style={{ background: meta ? meta.color : 'transparent', border: meta ? 0 : '1px dashed var(--border-strong)' }} />
       <select className="select select-sm" value={c ?? ''} aria-label="Confidence" onChange={(e) => onChange((e.target.value || null) as Confidence | undefined)}>
         <option value="">Not rated</option>

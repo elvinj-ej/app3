@@ -60,7 +60,7 @@ domain (v2.12); Salesforce.com (CSV) is moved into it on first start.
 A new VMInfo file is **held for review** before it replaces the current inventory. The dashboards keep showing the
 current data, and everyone sees a banner that an upload is awaiting review. The review panel shows:
 
-- **Totals before → after** for powered-on VMs, vCPU, vRAM and storage, and the risk-adjusted vCPU at the end of the forecast FY.
+- **Totals before → after** for powered-on VMs, vCPU, vRAM and storage, and the expected vCPU left on-prem at the end of the forecast FY.
 - **Needs attention**: new applications without a decision; decisions whose application left the file (parked); decided
   applications whose footprint moved by **≥10% and ≥5 vCPU / 10 GB vRAM / 1 TB storage** (flagged if it grew while set
   to Retire); new VMs in applications leaving on-prem; mapping-rule conflicts; VMs moved onto a data-sovereignty cluster.
@@ -91,8 +91,8 @@ The planner and the confidence card use the same RAG colours.
 ### vRAM and storage in the forecast (v2.9)
 
 The "Projected at end of FY…" card shows **vCPU, vRAM assigned and storage used** (from v2.13; earlier versions used storage provisioned). For each, it gives the reduction
-against today plus the other scenario and the committed figure. The footprint chart's Indexed view has four lines
-(VMs, vCPU, vRAM, storage), and the Absolute view has four charts with the committed ↔ full plan range. All four count
+against today plus the other scenario and the most-left figure. The footprint chart's Indexed view has four lines
+(VMs, vCPU, vRAM, storage), and the Absolute view has four charts with the least-left ↔ most-left range. All four count
 powered-on VMs, matching the rest of the footprint. The Excel key figures and
 percentage chart include vRAM and storage.
 
@@ -106,19 +106,22 @@ In Settings › Deadlines, each milestone has these options:
 
 The number and colour on the chart match the badge in the Key deadlines list on the right, which is numbered by date.
 
-### Confidence and the risk-adjusted forecast
+### Confidence and the expected forecast (left on-prem)
 
 For each application that leaves on-prem, the planner records a **confidence**: Budgeted, High, Medium, Low or Unknown. It is
 blank until someone rates it. Confidence means "it will be off on-prem by its target quarter". Each level counts a share of the
 workload as moved, and these weights are editable in Settings (defaults: Budgeted 100%, High 90%, Medium 75%, Low 50%, Unknown 25%, Not rated 25%).
 
-The forecast is shown in three scenarios:
-- **Risk-adjusted** (default headline): every move is weighted by its confidence.
-- **Full plan**: every scheduled move happens on its target quarter.
-- **Committed**: only Budgeted and High-confidence moves happen. This is the safe floor.
+Every forecast figure is what is **left on-prem after the planned moves**. It is shown in three scenarios:
+- **Expected** (default headline, formerly "risk-adjusted"): every move is weighted by its confidence.
+- **Least left** (best case, formerly "full plan"): every scheduled move happens on its target quarter.
+- **Most left** (funded moves only, formerly "committed"): only Budgeted and High-confidence moves happen.
 
-The **Risk-adjusted / Full plan** toggle on the Executive Summary switches every headline number and chart, and the
-Excel export follows it. The absolute charts shade the range from committed to full plan.
+The **Expected / Best case** toggle on the Executive Summary switches every headline number and chart, and the Excel
+export follows it. The "Left on-prem at end of FY…" card shows, for vCPU, vRAM and storage, today → left → moved off,
+and a bar splitting today's total into **stays regardless** (left even if every move happens), **depends on unfunded
+moves** (Medium, Low, Unknown, not rated) and **funded to move off** (Budgeted + High), with the headline figure marked.
+The absolute charts shade the same least-left ↔ most-left range.
 
 ### Treatments
 
@@ -128,7 +131,7 @@ Stay On-Prem (Latency) · Stay On-Prem (Maintain: no migration planned, not sove
 The three Stay On-Prem treatments can carry an optional **Review by** quarter, which marks when the decision should be
 re-assessed. It does not change the forecast. The Executive Summary's **What stays on-prem** card, also in the Excel export,
 breaks the remaining end-of-horizon footprint down into Sovereignty, Latency, Maintain, Undecided, moves that have no
-target or fall after the horizon, and (in risk-adjusted view) the confidence shortfall on scheduled moves.
+target or fall after the horizon, and (in Expected view) the confidence shortfall on scheduled moves.
 If the app reads a treatment it doesn't recognise, for example one written by a newer version, it shows that application as Undecided instead of failing.
 
 Decisions belong to the application, not to a particular upload. They're keyed on the exact `Application_Primary`

@@ -50,9 +50,9 @@ export default function ChangeReport({ r, title }: { r: Report; title?: string }
           </div>
         ))}
         <div className="cr-kpi">
-          <div className="k-label">vCPU end of {fyLabel(f.horizonFY)} (risk-adj.)</div>
+          <div className="k-label">vCPU left on-prem end of {fyLabel(f.horizonFY)} (expected)</div>
           <div className="num"><b>{fmt(f.endAfter.risk)}</b> <span className={f.endAfter.risk - f.endBefore.risk > 0 ? 'cr-up' : f.endAfter.risk - f.endBefore.risk < 0 ? 'cr-down' : 'muted'}>{signed(f.endAfter.risk - f.endBefore.risk)}</span></div>
-          <div className="muted" style={{ fontSize: 11.5 }}>full plan {fmt(f.endBefore.plan)} → {fmt(f.endAfter.plan)}</div>
+          <div className="muted" style={{ fontSize: 11.5 }}>least left {fmt(f.endBefore.plan)} → {fmt(f.endAfter.plan)}</div>
         </div>
       </div>
       <p className="note" style={{ margin: '4px 0 10px' }}>Footprint figures are for powered-on VMs (virtualization resources excluded), after mapping rules.</p>

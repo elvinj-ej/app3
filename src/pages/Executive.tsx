@@ -34,7 +34,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
     }
   };
   const isRisk = basis === 'risk';
-  const bLabel = isRisk ? 'risk-adjusted' : 'full plan';
+  const bLabel = isRisk ? 'expected' : 'best case';
 
   const vms = useMemo(() => scopeVMs(inventory.vms, settings, plans), [inventory, settings, plans]);
   const base = useMemo(() => totals(vms), [vms]);
@@ -142,9 +142,9 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
           </p>
         </div>
         <div className="filters no-print">
-          <div className="seg" role="group" aria-label="Forecast basis" title="Risk-adjusted weights each move by its confidence. Full plan assumes every move happens on its target quarter.">
-            <button aria-pressed={isRisk} onClick={() => setBasis('risk')}>Risk-adjusted</button>
-            <button aria-pressed={!isRisk} onClick={() => setBasis('plan')}>Full plan</button>
+          <div className="seg" role="group" aria-label="Forecast basis" title="Expected weights each move by its confidence. Best case assumes every scheduled move happens on time (least left on-prem).">
+            <button aria-pressed={isRisk} onClick={() => setBasis('risk')}>Expected</button>
+            <button aria-pressed={!isRisk} onClick={() => setBasis('plan')}>Best case</button>
           </div>
           <div className="seg" role="group" aria-label="Timeline granularity">
             <button aria-pressed={gran === 'quarter'} onClick={() => setGran('quarter')}>By quarter</button>
@@ -159,7 +159,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
             Include powered-off VMs ({inventory.vms.filter((v) => !v.poweredOn).length})
           </label>
           <button className="btn" onClick={printSummary}>Print / Save as PDF</button>
-          <a className="btn btn-primary" href={`api/export/treatment-plan.xlsx?basis=${basis}`} title="Executive summary with charts (follows the Risk-adjusted / Full plan toggle), treatment plan, quarterly roadmap, VMs and change log">Export to Excel (with charts)</a>
+          <a className="btn btn-primary" href={`api/export/treatment-plan.xlsx?basis=${basis}`} title="Executive summary with charts (follows the Expected / Best case toggle), treatment plan, quarterly roadmap, VMs and change log">Export to Excel (with charts)</a>
         </div>
       </div>
 
@@ -187,25 +187,42 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
           <div className="k-foot"><b>{decidedPct}%</b> of vCPU has a disposition</div>
         </div>
         <div className="card kpi kpi-span2">
-          <div className="k-label">Projected at end of {fyLabel(settings.horizonFY)} · {bLabel}</div>
-          <div className="proj-grid" title="Full plan = every scheduled move happens on its target quarter. Committed = only Budgeted and High-confidence moves happen.">
-            {METRICS.filter((m) => m.id !== 'vms').map((m) => (
-              <div key={m.id}>
-                <div className="proj-k">{m.id === 'vcpu' ? 'vCPU' : m.id === 'mem' ? 'vRAM assigned' : 'Storage used'}</div>
-                <div className="k-value num proj-v">{m.format(endPt[m.val])}</div>
-                <div className="k-foot"><span className="delta-down">−{fmt(100 - endPt[m.pct])}%</span> vs today ({m.format(points[0][m.val])})</div>
-                <div className="k-foot">{isRisk ? 'Full plan' : 'Risk-adj.'} {m.format(isRisk ? endPt[m.plan] : endPt[m.risk])}</div>
-                <div className="k-foot">Committed {m.format(endPt[m.commit])}</div>
-                {used.have && (m.id === 'vcpu' || m.id === 'mem') && (
-                  <div className="k-foot proj-used" title="Right-sized: assigned × 24-hour average utilisation % from RVTools, same scenario as above. VMs without utilisation data count at their assigned size.">
-                    <div>Used (24-h avg) <b>{m.format(m.id === 'vcpu' ? used.end.vcpu : used.end.memGB)}</b></div>
-                    <div>today {m.format(m.id === 'vcpu' ? used.today.vcpu : used.today.memGB)} used</div>
+          <div className="k-label"><b>Left on-prem at end of {fyLabel(settings.horizonFY)}</b> · after planned moves · {bLabel}</div>
+          <div className="proj-grid" title="Expected = each move weighted by its confidence. Least left = every scheduled move happens on time. Most left = only Budgeted and High-confidence moves happen.">
+            {METRICS.filter((m) => m.id !== 'vms').map((m) => {
+              const today = points[0][m.val], left = endPt[m.val];
+              const least = endPt[isRisk ? m.plan : m.val], most = endPt[m.commit];
+              const span = Math.max(1e-9, today);
+              const pos = (x: number) => `${Math.max(0, Math.min(100, (x / span) * 100))}%`;
+              return (
+                <div key={m.id}>
+                  <div className="proj-k">{m.id === 'vcpu' ? 'vCPU' : m.id === 'mem' ? 'vRAM assigned' : 'Storage used'} left on-prem</div>
+                  <div className="k-value num proj-v">{m.format(left)}<small>{bLabel}</small></div>
+                  <div className="k-foot">{m.format(today)} today → {m.format(left)} left · <span className="delta-down">{m.format(Math.max(0, today - left))} moved off (−{fmt(100 - endPt[m.pct])}%)</span></div>
+                  {/* Today's total split three ways: stays regardless · depends on unfunded moves · funded to move off */}
+                  <div className="lbar" role="img" aria-label={`${m.format(least)} stays even if every move happens, ${m.format(most - least)} depends on unfunded moves, ${m.format(today - most)} funded to move off`}>
+                    <span className="lb-stay" style={{ width: pos(least) }} />
+                    <span className="lb-risk" style={{ width: `calc(${pos(most)} - ${pos(least)})` }} />
+                    <span className="lb-go" style={{ width: `calc(100% - ${pos(most)})` }} />
+                    <span className="lb-mark" style={{ left: pos(left) }} title={`${bLabel}: ${m.format(left)} left`} />
                   </div>
-                )}
-              </div>
-            ))}
+                  <div className="lbar-key">
+                    <div><i className="lb-stay" /><span title="Still on-prem even if every scheduled move happens on time (stay-on-prem, undecided or unscheduled apps)">Stays regardless</span><b className="num">{m.format(least)}</b></div>
+                    <div><i className="lb-risk" /><span title="Leaves only if the Medium, Low, Unknown and not-rated moves happen">Depends on unfunded moves</span><b className="num">{m.format(Math.max(0, most - least))}</b></div>
+                    <div><i className="lb-go" /><span title="Budgeted and High-confidence moves">Funded to move off</span><b className="num">{m.format(Math.max(0, today - most))}</b></div>
+                    <div className="lbar-exp"><i className="lb-markkey" /><span>{isRisk ? 'Expected left' : 'Best case left'}</span><b className="num">{m.format(left)}</b></div>
+                  </div>
+                  {!isRisk && <div className="k-foot">Expected {m.format(endPt[m.risk])} left</div>}
+                  {used.have && (m.id === 'vcpu' || m.id === 'mem') && (
+                    <div className="k-foot proj-used" title="Right-sized: assigned × 24-hour average utilisation % from RVTools, same scenario as above. VMs without utilisation data count at their assigned size.">
+                      Used (24-h avg): <b className="num">{m.format(m.id === 'vcpu' ? used.end.vcpu : used.end.memGB)}</b> of the {m.format(left)} left · today {m.format(m.id === 'vcpu' ? used.today.vcpu : used.today.memGB)}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
-          <div className="k-foot">{fmt(endPt.vms)} VMs remaining · <span className="delta-down">−{fmt(100 - endPt.vmsPct)}% VMs</span></div>
+          <div className="proj-vms"><b className="num">{fmt(endPt.vms)}</b> VMs left on-prem of {fmt(points[0].vms)} today · <span className="delta-down">{fmt(points[0].vms - endPt.vms)} moved off (−{fmt(100 - endPt.vmsPct)}%)</span></div>
         </div>
         <div className="card kpi kpi-rich">
           <div className="k-label">Confidence of scheduled moves</div>
@@ -254,11 +271,11 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
         <div className="card card-pad">
           <div className="card-head">
             <div>
-              <h2>On-prem footprint by {gran === 'quarter' ? 'quarter' : 'financial year'}</h2>
+              <h2>Left on-prem by {gran === 'quarter' ? 'quarter' : 'financial year'}</h2>
               <p className="sub">
                 {mode === 'indexed'
-                  ? `${isRisk ? 'Risk-adjusted' : 'Full-plan'} VMs, vCPU, vRAM and storage remaining at the end of each ${gran === 'quarter' ? 'FY quarter' : 'FY'}, indexed to today = 100%. Hover for the other scenarios.`
-                  : `${isRisk ? 'Risk-adjusted forecast' : 'Full plan'} (solid line) within the range from committed (Budgeted + High only) to full plan (every move on its target quarter).`}
+                  ? `VMs, vCPU, vRAM and storage left on-prem after planned moves (${bLabel}) at the end of each ${gran === 'quarter' ? 'FY quarter' : 'FY'}, indexed to today = 100%. Hover for the other scenarios.`
+                  : `Left on-prem – ${bLabel} (solid line) within the range from most left (funded moves only) to least left (all moves on time).`}
               </p>
             </div>
             <div className="seg" role="group" aria-label="Chart scale">
@@ -271,8 +288,8 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
             <span><i className="ln" style={{ background: 'var(--line-vcpu)' }} /> vCPU</span>
             <span><i className="ln" style={{ background: 'var(--line-mem)' }} /> vRAM</span>
             <span><i className="ln" style={{ background: 'var(--line-stor)' }} /> Storage used</span>
-            {mode === 'absolute' && <span><i className="dot" style={{ background: 'var(--text-3)', opacity: 0.25, width: 16 }} /> Range: committed ↔ full plan</span>}
-            {mode === 'absolute' && <span><i className="ln" style={{ background: 'none', borderTop: '2px dashed var(--text-3)' }} /> {isRisk ? 'Full plan' : 'Risk-adjusted'}</span>}
+            {mode === 'absolute' && <span><i className="dot" style={{ background: 'var(--text-3)', opacity: 0.25, width: 16 }} /> Range: least left ↔ most left</span>}
+            {mode === 'absolute' && <span><i className="ln" style={{ background: 'none', borderTop: '2px dashed var(--text-3)' }} /> {isRisk ? 'Best case (least left)' : 'Expected'}</span>}
             {refLines.length > 0 && <span><i className="ms-dot">1</i> Milestone – see Key deadlines (placed in the {gran === 'quarter' ? 'quarter' : 'FY'} it falls in)</span>}
             {refLines.some(([, ds]) => ds.some((d) => milestoneMarker(d) === 'line')) && <span><i className="ln" style={{ background: 'none', borderTop: '2px dotted var(--text-2)' }} /> Enterprise-wide milestone</span>}
           </div>
@@ -317,7 +334,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
             <summary className="note" style={{ cursor: 'pointer' }}>Table view</summary>
             <table className="t" style={{ marginTop: 8 }}>
               <thead>
-                <tr><th>Point ({bLabel})</th>{METRICS.map((m) => <th key={m.id} className="r">{m.label}</th>)}{METRICS.map((m) => <th key={`p${m.id}`} className="r">{m.label} %</th>)}<th className="r">vCPU risk-adj.</th><th className="r">vCPU full plan</th><th className="r">vCPU committed</th></tr>
+                <tr><th>Point ({bLabel})</th>{METRICS.map((m) => <th key={m.id} className="r">{m.label}</th>)}{METRICS.map((m) => <th key={`p${m.id}`} className="r">{m.label} %</th>)}<th className="r">vCPU left – expected</th><th className="r">vCPU left – least</th><th className="r">vCPU left – most</th></tr>
               </thead>
               <tbody>
                 {points.map((p) => (
@@ -338,7 +355,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
           <div className="card-head">
             <div>
               <h2>Key deadlines</h2>
-              <p className="sub">Projected on-prem vCPU on each date: risk-adjusted · full plan · committed</p>
+              <p className="sub">vCPU left on-prem on each date: expected · least left (all moves on time) · most left (funded moves only)</p>
             </div>
             <a className="btn btn-sm" href="#/settings">Edit</a>
           </div>
@@ -352,7 +369,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
             const days = daysUntil(d.date);
             return (
               <div className="deadline" key={d.id}>
-                <div className="nd-date">
+                <div className="dl-date">
                   <div className="m">{at.toLocaleDateString('en-AU', { month: 'short' })}</div>
                   <div className="y">{at.getFullYear()}</div>
                 </div>
@@ -365,7 +382,7 @@ export default function Executive({ onPlan }: { onPlan: () => void }) {
                   {fmtDate(d.date)} · {fyLabel(fyOf(at))} · {humanCountdown(days)}
                 </div>
                 <div className="dl-proj">
-                  <DeadlineNumbers sc={sc} today={today} basis={basis} scope={vendor ? `On ${VENDOR_LABEL[vendor]} clusters` : 'Remaining'} />
+                  <DeadlineNumbers sc={sc} today={today} basis={basis} scope={vendor ? `On ${VENDOR_LABEL[vendor]} clusters` : 'All clusters'} />
                 </div>
               </div>
             );
@@ -479,12 +496,12 @@ function TrendTip({ active, payload, label }: { active?: boolean; payload?: { pa
   return (
     <div className="chart-tip">
       <div className="h">{label === 'Now' ? 'Today' : `End of ${label}`}</div>
-      <div className="r"><span><i className="dot" style={{ background: 'var(--line-vm)' }} /> VMs ({p.basis === 'risk' ? 'risk-adj.' : 'full plan'})</span><b className="num">{fmt(p.vms)} · {p.vmsPct}%</b></div>
-      <div className="r"><span><i className="dot" style={{ background: 'var(--line-vcpu)' }} /> vCPU ({p.basis === 'risk' ? 'risk-adj.' : 'full plan'})</span><b className="num">{fmt(p.vcpu)} · {p.vcpuPct}%</b></div>
+      <div className="r"><span><i className="dot" style={{ background: 'var(--line-vm)' }} /> VMs left ({p.basis === 'risk' ? 'expected' : 'best case'})</span><b className="num">{fmt(p.vms)} · {p.vmsPct}%</b></div>
+      <div className="r"><span><i className="dot" style={{ background: 'var(--line-vcpu)' }} /> vCPU left ({p.basis === 'risk' ? 'expected' : 'best case'})</span><b className="num">{fmt(p.vcpu)} · {p.vcpuPct}%</b></div>
       <div className="r"><span><i className="dot" style={{ background: 'var(--line-mem)' }} /> vRAM</span><b className="num">{fmtTB(p.memGB)} · {p.memPct}%</b></div>
       <div className="r"><span><i className="dot" style={{ background: 'var(--line-stor)' }} /> Storage used</span><b className="num">{fmtTB(p.storGB)} · {p.storPct}%</b></div>
-      <div className="r" style={{ borderTop: '1px solid var(--border)', marginTop: 4, paddingTop: 4 }}><span>{p.basis === 'risk' ? 'vCPU full plan' : 'vCPU risk-adjusted'}</span><b className="num">{fmt(p.basis === 'risk' ? p.vcpuPlan : p.vcpuRisk)}</b></div>
-      <div className="r"><span>vCPU committed</span><b className="num">{fmt(p.vcpuCommit)}</b></div>
+      <div className="r" style={{ borderTop: '1px solid var(--border)', marginTop: 4, paddingTop: 4 }}><span>{p.basis === 'risk' ? 'vCPU least left' : 'vCPU expected left'}</span><b className="num">{fmt(p.basis === 'risk' ? p.vcpuPlan : p.vcpuRisk)}</b></div>
+      <div className="r"><span>vCPU most left</span><b className="num">{fmt(p.vcpuCommit)}</b></div>
     </div>
   );
 }
@@ -528,7 +545,7 @@ function DomainTable({ basis }: { basis: Basis }) {
       <div className="card-head"><div><h2>Footprint by domain</h2><p className="sub">Domain parsed from Application_Primary</p></div></div>
       <div className="table-wrap" style={{ borderTop: 0 }}>
         <table className="t">
-          <thead><tr><th>Domain</th><th className="r">Apps</th><th className="r">VMs</th><th className="r">vCPU</th><th className="r">Decided</th><th className="r">vCPU end {fyLabel(settings.horizonFY)} ({basis === 'risk' ? 'risk-adj.' : 'full plan'})</th></tr></thead>
+          <thead><tr><th>Domain</th><th className="r">Apps</th><th className="r">VMs</th><th className="r">vCPU</th><th className="r">Decided</th><th className="r">vCPU left end {fyLabel(settings.horizonFY)} ({basis === 'risk' ? 'expected' : 'best case'})</th></tr></thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.domain}>
@@ -616,9 +633,9 @@ function DeadlineNumbers({ sc, today, scope, basis }: { sc: Scenarios; today: { 
   const head = basis === 'risk' ? sc.risk : sc.plan;
   return (
     <>
-      {scope}: <b className="num">{fmt(head.vcpu)}</b> vCPU / <b className="num">{fmt(head.vms)}</b> VMs {basis === 'risk' ? 'risk-adjusted' : 'full plan'}
+      {scope}: <b className="num">{fmt(head.vcpu)}</b> vCPU / <b className="num">{fmt(head.vms)}</b> VMs left on-prem ({basis === 'risk' ? 'expected' : 'best case'})
       <div className="note" style={{ marginTop: 2 }}>
-        {basis === 'risk' ? `Full plan ${fmt(sc.plan.vcpu)}` : `Risk-adjusted ${fmt(sc.risk.vcpu)}`} · committed {fmt(sc.committed.vcpu)} vCPU · today {fmt(today.vcpu)}
+        {basis === 'risk' ? `Least left ${fmt(sc.plan.vcpu)}` : `Expected ${fmt(sc.risk.vcpu)}`} · most left {fmt(sc.committed.vcpu)} vCPU · today {fmt(today.vcpu)}
       </div>
     </>
   );
@@ -667,7 +684,7 @@ function WhatStaysCard({ basis }: { basis: Basis }) {
       <div className="card-head">
         <div>
           <h2>What stays on-prem at the end of {fyLabel(settings.horizonFY)}</h2>
-          <p className="sub">Why the remaining <b className="num">{fmt(total)}</b> vCPU / <b className="num">{fmt(totalVms)}</b> VMs ({basis === 'risk' ? 'risk-adjusted' : 'full plan'}) is still on-prem – sizes the next hardware refresh and VMware renewal</p>
+          <p className="sub">Why the remaining <b className="num">{fmt(total)}</b> vCPU / <b className="num">{fmt(totalVms)}</b> VMs ({basis === 'risk' ? 'expected' : 'best case'}) is still left on-prem – sizes the next hardware refresh and VMware renewal</p>
         </div>
       </div>
       <div className="meter" style={{ height: 10, marginTop: 0, marginBottom: 14 }} title="Share of remaining vCPU">
